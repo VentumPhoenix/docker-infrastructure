@@ -64,8 +64,9 @@ services:
     #extra_hosts:
     #  - "desktop-pc:10.0.0.10"
     networks:
-      - npm-proxy
-      - egress   # RDP hosts in the LAN / NetBird, OIDC discovery at Authentik
+      npm-proxy:
+      egress:   # RDP hosts in the LAN / NetBird, OIDC discovery at Authentik
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:   # no health endpoint, so check that the gateway process runs (busybox pgrep, Alpine)
       test: ["CMD", "pgrep", "rdpgw"]
       interval: 30s

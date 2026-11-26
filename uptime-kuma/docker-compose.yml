@@ -32,9 +32,10 @@ services:
     volumes:
       - app-data:/app/data
     networks:
-      - npm-proxy
-      - internal
-      - egress   # checks external targets
+      npm-proxy:
+      internal:
+      egress:   # checks external targets
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:   # same as the image's own healthcheck (Go binary, no curl needed)
       test: ["CMD", "extra/healthcheck"]
       interval: 60s

@@ -41,9 +41,10 @@ services:
       # so relative bind mounts in the deployed stacks resolve correctly
       - ${DOCKHAND_STACKS_DIR:-/opt/stacks}:${DOCKHAND_STACKS_DIR:-/opt/stacks}
     networks:
-      - npm-proxy
-      - internal
-      - egress   # git sync of stack repositories, update checks
+      npm-proxy:
+      internal:
+      egress:   # git sync of stack repositories, update checks
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:   # same as the image's own healthcheck
       test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://127.0.0.1:3000/"]
       interval: 30s

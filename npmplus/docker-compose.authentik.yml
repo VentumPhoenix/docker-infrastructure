@@ -148,9 +148,13 @@ services:
     pids_limit: 100
     mem_limit: 256m
 
-  # Adds targeted exceptions to Docker's ICC block (enable_icc=false):
+  # Adds targeted exceptions to Docker's ICC block (enable_icc=false) and blocks internet and host:
   #   npm-proxy:    only NPMplus (.2) opens connections, the sync (.3) only to NPMplus
-  #   socket-proxy: clients only to the socket proxy (.2)
+  #   npm-proxy:    no internet, except NPMplus (.2, certificates) and CrowdSec (.4, blocklist).
+  #                 Apps that need the internet get the network egress (gw_priority: 1).
+  #   npm-proxy:    no access to the host itself, except NPMplus (.2, host.docker.internal)
+  #   socket-proxy: clients only to the socket proxy (.2), no access to the host itself
+  # Rules live in DOCKER-USER (forwarded traffic) and INPUT (traffic to the host).
   # A missing rule means blocked (fail-closed). The healthcheck verifies everything.
   firewall:
     # Needs NET_ADMIN in the host network, so no *hardened
@@ -175,13 +179,24 @@ services:
         mkdir -p $$D
         rm -f $$D/status $$D/heartbeat $$D/canon
 
-        # Desired rules
+        # Desired rules: "<chain> <rule>". Each one is inserted at the top of its chain,
+        # so per chain the FIRST line ends up LAST: every DROP must stay above its ACCEPTs.
+        CHAINS="DOCKER-USER INPUT"
         cat > $$D/rules <<'EOF'
-        -i ${NPM_PROXY_BRIDGE:-br-npm} -o ${NPM_PROXY_BRIDGE:-br-npm} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-        -i ${NPM_PROXY_BRIDGE:-br-npm} -o ${NPM_PROXY_BRIDGE:-br-npm} -s ${NPM_PROXY_NET_PREFIX:-172.30.0}.2 -j ACCEPT
-        -i ${NPM_PROXY_BRIDGE:-br-npm} -o ${NPM_PROXY_BRIDGE:-br-npm} -s ${NPM_PROXY_NET_PREFIX:-172.30.0}.3 -d ${NPM_PROXY_NET_PREFIX:-172.30.0}.2 -j ACCEPT
-        -i ${SOCKET_PROXY_BRIDGE:-br-sockprx} -o ${SOCKET_PROXY_BRIDGE:-br-sockprx} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-        -i ${SOCKET_PROXY_BRIDGE:-br-sockprx} -o ${SOCKET_PROXY_BRIDGE:-br-sockprx} -d ${SOCKET_PROXY_NET_PREFIX:-172.31.0}.2 -j ACCEPT
+        DOCKER-USER -i ${NPM_PROXY_BRIDGE:-br-npm} ! -o ${NPM_PROXY_BRIDGE:-br-npm} -j DROP
+        DOCKER-USER -i ${NPM_PROXY_BRIDGE:-br-npm} ! -o ${NPM_PROXY_BRIDGE:-br-npm} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        DOCKER-USER -i ${NPM_PROXY_BRIDGE:-br-npm} ! -o ${NPM_PROXY_BRIDGE:-br-npm} -s ${NPM_PROXY_NET_PREFIX:-172.30.0}.2 -j ACCEPT
+        DOCKER-USER -i ${NPM_PROXY_BRIDGE:-br-npm} ! -o ${NPM_PROXY_BRIDGE:-br-npm} -s ${NPM_PROXY_NET_PREFIX:-172.30.0}.4 -j ACCEPT
+        DOCKER-USER -i ${NPM_PROXY_BRIDGE:-br-npm} -o ${NPM_PROXY_BRIDGE:-br-npm} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        DOCKER-USER -i ${NPM_PROXY_BRIDGE:-br-npm} -o ${NPM_PROXY_BRIDGE:-br-npm} -s ${NPM_PROXY_NET_PREFIX:-172.30.0}.2 -j ACCEPT
+        DOCKER-USER -i ${NPM_PROXY_BRIDGE:-br-npm} -o ${NPM_PROXY_BRIDGE:-br-npm} -s ${NPM_PROXY_NET_PREFIX:-172.30.0}.3 -d ${NPM_PROXY_NET_PREFIX:-172.30.0}.2 -j ACCEPT
+        DOCKER-USER -i ${SOCKET_PROXY_BRIDGE:-br-sockprx} -o ${SOCKET_PROXY_BRIDGE:-br-sockprx} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        DOCKER-USER -i ${SOCKET_PROXY_BRIDGE:-br-sockprx} -o ${SOCKET_PROXY_BRIDGE:-br-sockprx} -d ${SOCKET_PROXY_NET_PREFIX:-172.31.0}.2 -j ACCEPT
+        INPUT -i ${NPM_PROXY_BRIDGE:-br-npm} -j DROP
+        INPUT -i ${NPM_PROXY_BRIDGE:-br-npm} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        INPUT -i ${NPM_PROXY_BRIDGE:-br-npm} -s ${NPM_PROXY_NET_PREFIX:-172.30.0}.2 -j ACCEPT
+        INPUT -i ${SOCKET_PROXY_BRIDGE:-br-sockprx} -j DROP
+        INPUT -i ${SOCKET_PROXY_BRIDGE:-br-sockprx} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
         EOF
         WANT=$$(grep -c . $$D/rules)
 
@@ -198,28 +213,36 @@ services:
         chmod +x /usr/local/bin/fw-health
 
         cleanup() {
-          $$IPT -S DOCKER-USER | grep -- "--comment $$TAG" | sed 's/^-A/-D/' \
-            | while read -r rule; do eval "$$IPT $$rule"; done
+          for c in $$CHAINS; do
+            $$IPT -S $$c | grep -- "--comment $$TAG" | sed 's/^-A/-D/' \
+              | while read -r rule; do eval "$$IPT $$rule"; done
+          done
         }
         apply() {
           cleanup
-          while read -r r; do
-            [ -n "$$r" ] || continue
-            $$IPT -I DOCKER-USER $$r -m comment --comment "$$TAG"
+          while read -r c r; do
+            [ -n "$$c" ] || continue
+            $$IPT -I $$c $$r -m comment --comment "$$TAG"
           done < $$D/rules
           # How iptables prints our own rules = desired state for the comparison
-          $$IPT -S DOCKER-USER | grep -- "--comment $$TAG" > $$D/canon
+          for c in $$CHAINS; do $$IPT -S $$c | grep -- "--comment $$TAG"; done > $$D/canon
         }
 
         apply
         trap 'echo "removing rules"; cleanup; exit 0' TERM INT
 
         while true; do
-          # 1 call: own rules complete, not duplicated and at the top?
-          cur=$$($$IPT -S DOCKER-USER | grep '^-A')
-          n=$$(echo "$$cur" | grep -c -- "--comment $$TAG")
-          top=$$(echo "$$cur" | head -n "$$WANT")
-          if [ "$$n" -ne "$$WANT" ] || [ "$$top" != "$$(cat $$D/canon)" ]; then
+          # 1 call per chain: own rules complete, not duplicated and at the top?
+          n=0
+          ontop=1
+          for c in $$CHAINS; do
+            cur=$$($$IPT -S $$c | grep '^-A')
+            mine=$$(grep -- "^-A $$c " $$D/canon)
+            k=$$(echo "$$mine" | grep -c .)
+            n=$$((n + $$(echo "$$cur" | grep -c -- "--comment $$TAG")))
+            [ "$$(echo "$$cur" | head -n "$$k")" = "$$mine" ] || ontop=0
+          done
+          if [ "$$n" -ne "$$WANT" ] || [ "$$ontop" -ne 1 ]; then
             echo "rules missing, duplicated or not at the top ($$n/$$WANT) - reapplying"
             apply
           fi

@@ -41,9 +41,10 @@ services:
     #extra_hosts:
     #  - "llm-server:10.0.0.20"
     networks:
-      - npm-proxy
-      - internal
-      - egress   # LLM server in the LAN / NetBird
+      npm-proxy:
+      internal:
+      egress:   # LLM server in the LAN / NetBird
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:
       test: ["CMD", "node", "src/healthcheck.js"]
       interval: 30s
@@ -93,8 +94,9 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     networks:
-      - internal
-      - egress   # VPN tunnel
+      internal:
+      egress:   # VPN tunnel
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:   # same as the image's own healthcheck: is the tunnel up?
       test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
       interval: 30s

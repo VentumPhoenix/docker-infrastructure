@@ -121,6 +121,7 @@ services:
         aliases:
           - netbird-server   # unique name, NPMplus addresses the server by it
       egress:   # GeoLite updates, external identity providers
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:   # no curl/wget in the image -> bash /dev/tcp against the health endpoint
       test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/9000 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && grep -q " 200 " <&3']
       interval: 30s

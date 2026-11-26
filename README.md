@@ -17,6 +17,7 @@ The repository is public to back up and version the configuration, and as inspir
 | [beszel](beszel/) | Monitoring | Server and container monitoring | `agent` |
 | [homepage](homepage/) | Monitoring | Dashboard, filled from labels | – |
 | [nextcloud](nextcloud/) | Apps | Files, office (Collabora), whiteboard, virus scan, SFTP | – |
+| [paperless](paperless/) | Apps | Document management with OCR and full-text search | `tika` |
 | [sillytavern](sillytavern/) | Apps | LLM chat frontend, API requests through a VPN | – |
 | [hastebin](hastebin/) | Apps | Pastebin for code snippets | – |
 
@@ -43,6 +44,16 @@ Internet ──80/443──▶ NPMplus ──npm-proxy──▶ app of each stac
 - **Secrets as files.** Passwords reach the containers via `/run/secrets/…`, not as environment variables.
 
 The full rule set is in **[CONVENTIONS.md](CONVENTIONS.md)**. Every variable is listed in **[VARIABLES.md](VARIABLES.md)**.
+
+## Requirements
+
+| Component | Minimum | Why |
+|---|---|---|
+| Docker Engine | **28.0** | `gw_priority` on the `egress` network (default route for apps, because `npm-proxy` has no internet) |
+| Docker Compose | **v2.33.1** (`docker compose`, not the old `docker-compose`) | `gw_priority` in compose files |
+| Host | Linux with iptables (nft or legacy) | the `firewall` of the `npmplus` stack manages `DOCKER-USER` and `INPUT` |
+
+Check with `docker version` and `docker compose version`. Dockhand runs Compose itself, so its bundled Compose must meet the same minimum.
 
 ## Tools this setup relies on
 

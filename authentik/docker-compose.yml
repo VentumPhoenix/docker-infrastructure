@@ -55,9 +55,10 @@ services:
       - app-data:/data                  # shared with worker on purpose (media)
       - app-templates:/templates        # shared with worker on purpose
     networks:
-      - npm-proxy
-      - internal
-      - egress   # OAuth/social login sources, update check
+      npm-proxy:
+      internal:
+      egress:   # OAuth/social login sources, update check
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:
       test: ["CMD", "ak", "healthcheck"]
       interval: 30s
@@ -119,8 +120,9 @@ services:
       # Docker API, which socket-proxy deliberately doesn't allow (see README).
       #- /var/run/docker.sock:/var/run/docker.sock
     networks:
-      - internal
-      - egress   # sends email, downloads blueprints and outpost updates
+      internal:
+      egress:   # sends email, downloads blueprints and outpost updates
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:
       test: ["CMD", "ak", "healthcheck"]
       interval: 30s

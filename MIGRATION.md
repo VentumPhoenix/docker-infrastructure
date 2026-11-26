@@ -6,11 +6,18 @@ What changes when switching an existing deployment to the stacks as they are des
 
 ---
 
+## Requirements
+
+- **Docker Engine 28.0** and **Docker Compose v2.33.1** or newer on the host (and in Dockhand), because of `gw_priority` on the `egress` network. Check with `docker version` and `docker compose version`. See [README](README.md#requirements).
+
 ## Order
 
-1. **`npmplus` first.** Deploy it with the temporary `npm-legacy` network (see [npmplus/README.md](npmplus/README.md#migrating-from-an-existing-network)), so apps in the old network stay reachable.
-2. **Then every other stack, one at a time:** update `.env` → copy volumes → deploy → check.
-3. **Finally** remove `npm-legacy` from `npmplus` and delete the old network.
+The new firewall of `npmplus` blocks the internet in `npm-proxy`. Only the new stack files route outbound traffic through `egress`, so **the app stacks go first and `npmplus` goes last**. Your current `npmplus` already creates the network `npm-proxy`, so the new app stacks can join it right away.
+
+1. **Every app stack, one at a time:** update `.env` → copy volumes → deploy the new file → check. Apps in the old network `npm-frontend` stay reachable, because your current `npmplus` is still attached to it (`npm-legacy`).
+2. **`npmplus` last:** update `.env` → copy the volume `npm-data` → deploy the new file. As long as any app still runs with its old file, add the temporary `npm-legacy` network (see [npmplus/README.md](npmplus/README.md#migrating-from-an-existing-network)).
+3. **Check the blocks:** the healthcheck of `firewall` must be healthy. Apps with `egress` (e.g. Paperless mail fetching, Uptime Kuma) must still reach the internet, apps without it (e.g. Hastebin) must not. Services that NPMplus proxies to on the host via `host.docker.internal` must still work.
+4. **Finally** remove `npm-legacy` from `npmplus` and delete the old network `npm-frontend`.
 
 ## Variables
 
@@ -114,6 +121,7 @@ Delete the old volumes only once the stack runs correctly: `docker volume rm <pr
 | authentik, homepage, dockhand, rdpgw, sillytavern, nextcloud | Network `npm-frontend` → `npm-proxy` (the other stacks already used `npm-proxy`). |
 | dockhand | The individual `/opt/…` mounts are replaced by one `DOCKHAND_STACKS_DIR` (default `/opt/stacks`). Move the stack folders there, or add one mount per folder. |
 | nextcloud | Nextcloud, Collabora and Whiteboard now get their proxy hosts from labels. **Delete the manually created proxy hosts in NPMplus first**, otherwise the domains collide. |
+| nextcloud | Collabora and rclone now reach Nextcloud internally (`http://app`). Run the `occ` commands from [nextcloud/README.md](nextcloud/README.md#setup) and point the rclone remotes in `auth.json` to `http://app/remote.php/dav/…`. |
 | nextcloud | `redis:latest` → `redis:8-alpine`, `restart: always` → `unless-stopped`, rclone log level `DEBUG` → `INFO`. |
 | sillytavern | The hand-written Authentik config in `npm.proxy.advanced.config` is replaced by `npm.proxy.auth_request: "authentik"`. `npm.proxy.domain` → `npm.proxy.domains`. Service `gluetun` → `vpn`, so the request proxy in SillyTavern's `config.yaml` becomes `http://vpn:8888`. |
 | netbird | `config.yaml` and `dashboard.env` are now inline in the compose file. Copy `authSecret` and `store.encryptionKey` from the old `config.yaml` into `.env` **unchanged**, and compare the rest (see [netbird/README.md](netbird/README.md#migrating-from-an-existing-setup)). |

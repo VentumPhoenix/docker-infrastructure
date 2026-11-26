@@ -17,8 +17,8 @@ Every variable used in any stack is listed here. **Same purpose → same name**,
 | `APP_DOMAIN` | ✅ | – | Public domain of the stack's main service, without `https://` | every stack |
 | `APP_VERSION` | ◐ if used | – | Image tag, only when several services share one image | authentik, nextcloud |
 | `TZ` | – | `Europe/Berlin` | Time zone of the containers | every stack except hastebin and netbird |
-| `PUID` | – | `1000` | User ID the app runs as (only images that support it) | homepage |
-| `PGID` | – | `1000` | Group ID the app runs as | homepage |
+| `PUID` | – | `1000` | User ID the app runs as (only images that support it) | homepage, paperless |
+| `PGID` | – | `1000` | Group ID the app runs as | homepage, paperless |
 
 ## Additional domains
 
@@ -44,7 +44,7 @@ These must have the **same value in every stack**.
 
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
-| `DB_PASSWORD` | ✅ | – | Password of the stack's own database. Generate: `openssl rand -hex 32` | authentik, dockhand, nextcloud |
+| `DB_PASSWORD` | ✅ | – | Password of the stack's own database. Generate: `openssl rand -hex 32` | authentik, dockhand, nextcloud, paperless |
 | `DB_ROOT_PASSWORD` | ✅ | – | Root password of the database, only for images that need one. Generate: `openssl rand -hex 32` | nextcloud |
 
 DB name and DB user are not variables. They are hard-coded in the compose file (= stack name).
@@ -111,6 +111,9 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `RDPGW_PAA_TOKEN_SIGNING_KEY` | ✅ | – | Signing key for gateway tokens, 32 characters, different from the others | rdpgw |
 | `RDPGW_PAA_TOKEN_ENCRYPTION_KEY` | ✅ | – | Encryption key for gateway tokens, 32 characters, different from the others | rdpgw |
 | `WHITEBOARD_JWT_SECRET` | ✅ | – | Shared secret between Nextcloud and the Whiteboard server. Generate: `openssl rand -hex 32` | nextcloud |
+| `PAPERLESS_SECRET_KEY` | ✅ | – | Key for signing sessions and tokens. Generate: `openssl rand -hex 32` | paperless |
+| `PAPERLESS_OCR_LANGUAGE` | – | `deu+eng` | OCR languages, joined with `+` | paperless |
+| `PAPERLESS_CONSUME_DIR` | – | `app-consume` (volume) | Folder for new documents. A host path (e.g. scanner share) replaces the volume | paperless |
 | `RCLONE_AUTH_FILE` | – | `/opt/rclone-sftp/auth.json` | Credentials file of the SFTP server on the host | nextcloud |
 | `RCLONE_SFTP_PORT` | – | `18022` | Host port of the SFTP server | nextcloud |
 | `NETBIRD_AUTH_SECRET` | ✅ | – | Shared secret of the NetBird relay. Generate: `openssl rand -hex 32` | netbird |

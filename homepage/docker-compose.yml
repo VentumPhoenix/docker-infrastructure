@@ -34,9 +34,10 @@ services:
     volumes:
       - app-config:/app/config
     networks:
-      - npm-proxy
-      - socket-proxy
-      - egress   # widgets and status checks via public URLs
+      npm-proxy:
+      socket-proxy:
+      egress:   # widgets and status checks via public URLs
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/healthcheck"]
       interval: 30s

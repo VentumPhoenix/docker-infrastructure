@@ -34,8 +34,9 @@ services:
       # Agent: hub talks to the local agent through a unix socket
       - agent-socket:/beszel_socket
     networks:
-      - npm-proxy
-      - egress   # connects to agents on other hosts
+      npm-proxy:
+      egress:   # connects to agents on other hosts
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:
       test: ["CMD", "/beszel", "health", "--url", "http://127.0.0.1:8090"]
       interval: 30s

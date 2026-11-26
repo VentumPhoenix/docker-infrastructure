@@ -50,11 +50,12 @@ A container is trusted neither because it runs on the same host nor because it s
 |---|---|---|---|
 | Internet → service | ❌ denied | NPMplus only (80/443) | network `npm-proxy` + `npm.proxy.*` labels |
 | Person → web UI | ❌ login required | the app's own login, otherwise Authentik | label `npm.proxy.auth_request` (§ 14) |
-| Service ↔ service (shared networks) | ❌ denied | not possible (ICC off + `npm-firewall`) | – |
+| Service ↔ service (shared networks) | ❌ denied | not possible (ICC off + `firewall` of the `npmplus` stack) | – |
 | Service ↔ service (same stack) | ✅ within the stack | stack network `internal` | `networks: [internal]` |
-| Service → internet | ❌ denied | stack network `egress` | `networks: [egress]` |
+| Service → internet / LAN | ❌ denied | stack network `egress` | `egress:` with `gw_priority: 1` |
 | Service → Docker API | ❌ denied | `socket-proxy`, read-only, allowlist | network `socket-proxy` |
 | Service → secrets | only its own | Compose `secrets:` | `secrets: [...]` |
+| Service → host (shared networks) | ❌ denied | not possible from `npm-proxy` / `socket-proxy` (only NPMplus for `host.docker.internal`) | – |
 | Container → host / kernel | minimal | `x-hardened` (or `x-base`), limits | anchors, `cap_add` |
 
 This results in a simple rule for reviews: **every network, every `cap_add` and every secret a service has is a permission.** If you can't explain why a service needs it, remove it.
@@ -62,9 +63,11 @@ This results in a simple rule for reviews: **every network, every `cap_add` and 
 The layers in detail:
 
 1. **Ingress:** Only NPMplus publishes ports. Apps sit in `npm-proxy`, where only NPMplus may initiate connections to them. Apps can only reply.
-2. **Lateral movement:** `npm-proxy` and `socket-proxy` have inter-container communication disabled. A compromised app cannot reach other apps, only its own stack (via `internal`).
-3. **Egress:** `internal` networks have no internet access (`internal: true`). A service that needs outbound access (sending email, fetching feeds, checking external sites) gets the stack network `egress`.
-   > 🚧 **Planned:** `npm-proxy` still provides internet access today. Once every stack declares `egress` where it's needed, `npm-firewall` will block outbound traffic from `npm-proxy` (except NPMplus and CrowdSec). The `egress` network then also needs `gw_priority` (Docker ≥ 28) so that it provides the default route. Until then, `egress` already documents which service needs the internet and why.
+2. **Lateral movement:** `npm-proxy` and `socket-proxy` have inter-container communication disabled. A compromised app cannot reach other apps, only its own stack (via `internal`). It can't reach the host itself through these networks either (SSH, other services on the host), only NPMplus may, for `host.docker.internal`.
+3. **Egress:** No network provides internet access by default. `internal` networks have none (`internal: true`), and the `firewall` of the `npmplus` stack blocks all outbound traffic from `npm-proxy` (except NPMplus itself for certificates and CrowdSec for its blocklist). A service that needs outbound access (fetching mail, app store, VPN tunnel, LAN hosts) gets the stack network `egress`, with `gw_priority: 1` so its default route goes through `egress` and not through `npm-proxy`.
+   > NPMplus only handles **inbound** traffic. It is not a forward proxy, so outbound connections never go through it. Services of the same stack talk to each other via `internal`, never via their public domain.
+   >
+   > `gw_priority` needs **Docker Engine 28.0** and **Docker Compose v2.33.1** or newer (see [README](README.md#requirements)). Don't use compose features that need newer versions without updating the requirements table.
 4. **Docker API:** Only through `socket-proxy` with a minimal read-only allowlist. Only trusted services join that network.
 5. **Container:** No new privileges, all capabilities dropped where possible, read-only root filesystem where possible, memory and PID limits on every service.
 6. **Secrets:** Passed as files (`/run/secrets/…`), not as environment variables. Environment variables of every container can be read through the Docker API (`containers/<id>/json`), and thus by every service in `socket-proxy`.
@@ -119,6 +122,7 @@ Standard features:
 | CrowdSec | `crowdsec` | `npmplus` stack: log analysis + blocklist + WAF (CrowdSec container, init job) |
 | Authentik | `authentik` | `npmplus` stack: `AUTH_REQUEST_AUTHENTIK_UPSTREAM`, so NPMplus can do forward auth |
 | Agent | `agent` | `beszel` stack: monitoring agent for the local host |
+| Tika | `tika` | `paperless` stack: Office documents and emails via Tika + Gotenberg |
 
 New features get a short, lowercase name and are added to this table.
 
@@ -572,9 +576,19 @@ networks:
 
 - **No `ports:`** except in the `npmplus` stack (80/443). All services are reachable only through the reverse proxy. A port is only allowed for protocols that can't go through an HTTP reverse proxy (e.g. SFTP, STUN/UDP). It is then marked as an exception in a comment, made configurable via a variable, and bound to a specific IP if possible.
 - Databases and caches join **only** `internal`, never `npm-proxy` or `egress`.
-- `npm-proxy` and `socket-proxy` have inter-container communication disabled (`enable_icc: false` + `npm-firewall`). Apps cannot reach each other there. (Blocking internet access from `npm-proxy` is planned, see § 1.)
+- `npm-proxy` and `socket-proxy` have inter-container communication disabled (`enable_icc: false` + `firewall`). Apps cannot reach each other there, and `npm-proxy` has no internet access.
 - `internal` is always `internal: true`. It provides no internet access. A stack with only one service doesn't need `internal`.
-- `egress` has ICC disabled. It only provides internet access, not a second path between the stack's services. Next to `egress`, a short comment says what the service needs internet access for.
+- **`egress` only when it's really needed**, and with a comment saying what for. Before adding it, check whether the connection can stay inside the stack instead (e.g. Nextcloud ↔ Collabora via `http://collabora:9980` and `http://app`). If a feature that needs the internet is optional, ask whether it's used.
+- `egress` has ICC disabled. It only provides internet access, not a second path between the stack's services.
+- Every service in `egress` uses map syntax with `gw_priority: 1`, so its default route goes through `egress`:
+  ```yaml
+      networks:
+        npm-proxy:
+        internal:
+        egress:   # fetching documents from mail accounts (IMAP)
+          gw_priority: 1   # default route via egress, npm-proxy has no internet
+  ```
+- A **published port** needs a network that isn't `internal`. If a service only has `internal` but publishes a port (e.g. SFTP), it joins `egress` for that, with a comment.
 - `internal` and `egress` get no `name:`. Compose turns them into `<stack>_internal` / `<stack>_egress` automatically.
 - Fixed IPs (`ipv4_address`) exist only in the `npmplus` stack, because the firewall rules rely on them. To keep them from colliding with dynamic addresses, the network splits its subnet: fixed IPs in the lower half (`.2`–`.127`), dynamic ones via `ip_range` in the upper half (`.128/25`).
 - Networks that only exist temporarily for a migration (e.g. `npm-legacy` → old `npm-frontend`) are marked with a comment and removed once the migration is done.
@@ -605,6 +619,7 @@ The socket proxy allows read access only. Caution: `containers/<name>/json` also
 | `postgres-data` | database files |
 | `redis-data` | Redis persistence |
 
+- **Volume or host path, chosen by the operator:** if some users need a host folder (e.g. a scanner share) and others don't, the mount uses a variable whose default is the named volume: `${PAPERLESS_CONSUME_DIR:-app-consume}:/usr/src/paperless/consume`. Without the variable it's the volume, with a path it's a bind mount.
 - **Every service has its own volumes.** Two services share a volume only if they deliberately access the same data (e.g. `server` and `worker` in Authentik). That is then commented.
 - Compose prefixes the stack name automatically (`hastebin_redis-data`), so volumes get no `name:`.
 - If a service only needs part of a volume, use `subpath` + `read_only` instead of the whole volume (example: CrowdSec only reads `nginx/logs` from `npm-data`).
@@ -840,9 +855,10 @@ services:
     volumes:
       - app-data:/data
     networks:
-      - npm-proxy
-      - internal
-      - egress          # sends notification emails
+      npm-proxy:
+      internal:
+      egress:   # sends notification emails
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 30s
@@ -951,7 +967,7 @@ DB_PASSWORD=
 - [ ] DB images with pinned major version
 - [ ] No `ports:`, only `app` in `npm-proxy`, DBs only in `internal`
 - [ ] Proxy networks with `name: ${NPM_PROXY_NETWORK:-npm-proxy}` / `${SOCKET_PROXY_NETWORK:-socket-proxy}`
-- [ ] `internal` with `internal: true`, `egress` only where needed and with a reason
+- [ ] `internal` with `internal: true`, `egress` only where really needed (internal URLs checked first), with a reason and `gw_priority: 1`
 - [ ] No direct Docker socket
 - [ ] Volumes named `<service>-<purpose>`
 - [ ] Every container with an explicit healthcheck (except one-shot jobs), `pids_limit`, `mem_limit`

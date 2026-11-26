@@ -54,9 +54,10 @@ services:
       # Optional: NAS share as external storage
       #- /mnt/nas/nextcloud:/nas
     networks:
-      - npm-proxy
-      - internal
-      - egress   # app store, updates, Collabora and Whiteboard via their public URLs
+      npm-proxy:
+      internal:
+      egress:   # app store, updates, Collabora and Whiteboard via their public URLs
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:   # status.php with the public domain as Host, so the trusted-domain check passes
       test: ["CMD", "curl", "-fs", "-o", "/dev/null", "-H", "Host: ${APP_DOMAIN}", "http://127.0.0.1/status.php"]
       interval: 30s
@@ -99,8 +100,9 @@ services:
       # Optional: NAS share as external storage
       #- /mnt/nas/nextcloud:/nas
     networks:
-      - internal
-      - egress   # background jobs fetch updates, news, federated shares
+      internal:
+      egress:   # background jobs fetch updates, news, federated shares
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:   # cron.sh runs "busybox crond" in the foreground
       test: ["CMD", "busybox", "pgrep", "-f", "crond"]
       interval: 30s
@@ -117,12 +119,13 @@ services:
     image: collabora/code:latest
     environment:
       TZ: ${TZ:-Europe/Berlin}
-      aliasgroup1: "https://${APP_DOMAIN}:443"
+      # Nextcloud hosts allowed to use Collabora: the public domain (browser) and
+      # http://app (internal WOPI callbacks, see README)
+      aliasgroup1: "https://${APP_DOMAIN}:443,http://app:80"
       extra_params: "--o:ssl.enable=false --o:ssl.termination=true"
     networks:
-      - npm-proxy
-      - internal   # Nextcloud may reach it as http://collabora:9980
-      - egress     # WOPI callbacks to Nextcloud via its public URL
+      - npm-proxy   # browser
+      - internal    # Nextcloud <-> Collabora, no internet needed
     healthcheck:   # no curl/wget in the image -> bash /dev/tcp, "/" answers "OK"
       test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/9980 && printf "GET / HTTP/1.0\r\n\r\n" >&3 && grep -q OK <&3']
       interval: 30s
@@ -198,7 +201,9 @@ services:
       # Exception: SFTP is not HTTP and can't go through the reverse proxy
       - "${RCLONE_SFTP_PORT:-18022}:22"
     networks:
-      - egress   # reaches Nextcloud via its public WebDAV URL
+      internal:   # reaches Nextcloud internally at http://app/remote.php/dav
+      egress:     # only for the published SFTP port (not possible on an internal network)
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:   # no health endpoint, so check that the SFTP server process runs
       test: ["CMD-SHELL", "pgrep -f 'serve sftp' >/dev/null"]
       interval: 30s
@@ -261,8 +266,9 @@ services:
     volumes:
       - clamav-data:/var/lib/clamav
     networks:
-      - internal
-      - egress   # virus database updates (freshclam)
+      internal:
+      egress:   # virus database updates (freshclam)
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
     healthcheck:   # same as the image's own healthcheck, first start downloads the virus database
       test: ["CMD", "clamdcheck.sh"]
       interval: 60s
