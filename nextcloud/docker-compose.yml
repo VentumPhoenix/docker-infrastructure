@@ -1,0 +1,299 @@
+# Nextcloud – files, calendar, contacts, with Collabora (office), Whiteboard, ClamAV and SFTP access
+# Upstream: https://github.com/nextcloud/docker, https://github.com/CollaboraOnline/online, https://github.com/nextcloud/whiteboard
+# Requires: network npm-proxy (stack npmplus)
+# Updates: manual – Nextcloud can only be upgraded one major version at a time
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${APP_VERSION:?e.g. 32}
+  - ${DB_PASSWORD:?}
+  - ${DB_ROOT_PASSWORD:?}
+  - ${COLLABORA_DOMAIN:?}
+  - ${WHITEBOARD_DOMAIN:?}
+  - ${WHITEBOARD_JWT_SECRET:?openssl rand -hex 32}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    # Apache entrypoint copies files and drops to www-data, so no *hardened
+    <<: *base
+    image: nextcloud:${APP_VERSION}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      OVERWRITEPROTOCOL: https
+      OVERWRITECLIURL: "https://${APP_DOMAIN}"
+      # Database
+      MYSQL_HOST: mariadb
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD_FILE: /run/secrets/db_password
+      # Cache
+      REDIS_HOST: redis
+    secrets:
+      - db_password
+    volumes:
+      - app-html:/var/www/html   # shared with cron on purpose
+      - app-data:/var/www/html/data
+      # Optional: NAS share as external storage
+      #- /mnt/nas/nextcloud:/nas
+    networks:
+      - npm-proxy
+      - internal
+      - egress   # app store, updates, Collabora and Whiteboard via their public URLs
+    healthcheck:   # status.php with the public domain as Host, so the trusted-domain check passes
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "-H", "Host: ${APP_DOMAIN}", "http://127.0.0.1/status.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    pids_limit: 500
+    mem_limit: 1g
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "80"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.nextcloud.http.name: "Nextcloud"
+      kuma.nextcloud.http.url: "https://${APP_DOMAIN}/status.php"
+      kuma.nextcloud.http.parent_name: "apps"
+      # Dashboard (Homepage)
+      homepage.group: "Apps"
+      homepage.name: "Nextcloud"
+      homepage.icon: "nextcloud"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Files & office"
+
+  cron:
+    # Same image and volumes as app, runs the background jobs
+    <<: *base
+    image: nextcloud:${APP_VERSION}
+    entrypoint: /cron.sh
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      - app-html:/var/www/html
+      - app-data:/var/www/html/data
+      # Optional: NAS share as external storage
+      #- /mnt/nas/nextcloud:/nas
+    networks:
+      - internal
+      - egress   # background jobs fetch updates, news, federated shares
+    healthcheck:   # cron.sh runs "busybox crond" in the foreground
+      test: ["CMD", "busybox", "pgrep", "-f", "crond"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    pids_limit: 200
+    mem_limit: 512m
+
+  collabora:
+    # Exception: Collabora builds jails for every document. It needs these capabilities,
+    # unconfined seccomp/AppArmor, and file capabilities (so no no-new-privileges).
+    <<: *base
+    image: collabora/code:latest
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      aliasgroup1: "https://${APP_DOMAIN}:443"
+      extra_params: "--o:ssl.enable=false --o:ssl.termination=true"
+    networks:
+      - npm-proxy
+      - internal   # Nextcloud may reach it as http://collabora:9980
+      - egress     # WOPI callbacks to Nextcloud via its public URL
+    healthcheck:   # no curl/wget in the image -> bash /dev/tcp, "/" answers "OK"
+      test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/9980 && printf "GET / HTTP/1.0\r\n\r\n" >&3 && grep -q OK <&3']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    cap_add:
+      - MKNOD
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    pids_limit: 1000
+    mem_limit: 2g
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${COLLABORA_DOMAIN}
+      npm.proxy.port: "9980"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.collabora.http.name: "Collabora"
+      kuma.collabora.http.url: "https://${COLLABORA_DOMAIN}"
+      kuma.collabora.http.parent_name: "apps"
+
+  whiteboard:
+    <<: *hardened
+    image: ghcr.io/nextcloud-releases/whiteboard:stable
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      NEXTCLOUD_URL: "https://${APP_DOMAIN}"
+      JWT_SECRET_KEY_FILE: /run/secrets/whiteboard_jwt_secret
+    secrets:
+      - whiteboard_jwt_secret
+    networks:
+      - npm-proxy
+      - internal
+    healthcheck:   # same as the image's own healthcheck
+      test: ["CMD", "node", "websocket_server/healthcheck.js"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    pids_limit: 200
+    mem_limit: 256m
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${WHITEBOARD_DOMAIN}
+      npm.proxy.port: "3002"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.whiteboard.http.name: "Nextcloud Whiteboard"
+      kuma.whiteboard.http.url: "https://${WHITEBOARD_DOMAIN}"
+      kuma.whiteboard.http.parent_name: "apps"
+
+  # SFTP access to Nextcloud files via rclone (remotes defined in auth.json)
+  rclone-sftp:
+    <<: *hardened
+    image: ghcr.io/gera2ld/rclone-server
+    user: "1000:1000"
+    environment:
+      PORT_SFTP: "22"     # port inside the container
+      PORT_WEBDAV: ""     # empty = WebDAV service doesn't start
+      RCLONE_DIR_CACHE_TIME: 30s
+      RCLONE_VFS_CACHE_MODE: writes
+      RCLONE_VFS_CACHE_MAX_SIZE: 2G
+      RCLONE_CACHE_DIR: /cache
+      RCLONE_LOG_LEVEL: ${RCLONE_LOG_LEVEL:-INFO}
+    volumes:
+      # Exception: host file with credentials, kept outside the repo
+      - ${RCLONE_AUTH_FILE:-/opt/rclone-sftp/auth.json}:/etc/auth.json:ro
+      - rclone-sftp-cache:/cache
+    ports:
+      # Exception: SFTP is not HTTP and can't go through the reverse proxy
+      - "${RCLONE_SFTP_PORT:-18022}:22"
+    networks:
+      - egress   # reaches Nextcloud via its public WebDAV URL
+    healthcheck:   # no health endpoint, so check that the SFTP server process runs
+      test: ["CMD-SHELL", "pgrep -f 'serve sftp' >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    pids_limit: 200
+    mem_limit: 512m
+
+  mariadb:
+    # Image switches users on startup, so no *hardened
+    <<: *base
+    image: mariadb:11.8
+    command: --transaction-isolation=READ-COMMITTED --log-bin=binlog --binlog-format=ROW
+    environment:
+      MARIADB_DATABASE: nextcloud
+      MARIADB_USER: nextcloud
+      MARIADB_PASSWORD_FILE: /run/secrets/db_password
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+    secrets:
+      - db_password
+      - db_root_password
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    pids_limit: 200
+    mem_limit: 1g
+
+  redis:
+    <<: *hardened
+    image: redis:8-alpine
+    volumes:
+      - redis-data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    cap_add:   # entrypoint fixes ownership of /data and drops to user redis
+      - CHOWN
+      - SETUID
+      - SETGID
+    pids_limit: 100
+    mem_limit: 256m
+
+  clamav:
+    # Image switches users on startup, so no *hardened
+    <<: *base
+    image: clamav/clamav:stable_base
+    volumes:
+      - clamav-data:/var/lib/clamav
+    networks:
+      - internal
+      - egress   # virus database updates (freshclam)
+    healthcheck:   # same as the image's own healthcheck, first start downloads the virus database
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 6m
+    pids_limit: 200
+    mem_limit: 3g
+
+secrets:
+  db_password:
+    environment: DB_PASSWORD
+  db_root_password:
+    environment: DB_ROOT_PASSWORD
+  whiteboard_jwt_secret:
+    environment: WHITEBOARD_JWT_SECRET
+
+volumes:
+  app-html:
+  app-data:
+  rclone-sftp-cache:
+  mariadb-data:
+  redis-data:
+  clamav-data:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  internal:
+    internal: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

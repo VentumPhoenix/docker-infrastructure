@@ -1,0 +1,110 @@
+# Dockhand – deploys and updates all other stacks
+# Upstream: https://github.com/Finsys/dockhand
+# Requires: network npm-proxy (stack npmplus)
+# Updates: manual – deployment tool for everything else, a broken update locks you out
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${DB_PASSWORD:?openssl rand -hex 32 (hex only, it's part of a URL)}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    # Entrypoint drops to user dockhand (uid 1001), so no *hardened
+    <<: *base
+    image: fnsys/dockhand:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      # Plain env var: the password is part of the URL (CONVENTIONS § 8 fallback)
+      DATABASE_URL: postgres://dockhand:${DB_PASSWORD}@postgres:5432/dockhand
+    volumes:
+      - app-data:/app/data
+      # Exception: Dockhand needs full write access to the Docker API to deploy stacks.
+      # socket-proxy is read-only, so the socket is mounted directly (see README).
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Exception: stack folders on the host, mounted at the same path inside and outside,
+      # so relative bind mounts in the deployed stacks resolve correctly
+      - ${DOCKHAND_STACKS_DIR:-/opt/stacks}:${DOCKHAND_STACKS_DIR:-/opt/stacks}
+    networks:
+      - npm-proxy
+      - internal
+      - egress   # git sync of stack repositories, update checks
+    healthcheck:   # same as the image's own healthcheck
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    pids_limit: 500
+    mem_limit: 512m
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "3000"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.dockhand.http.name: "Dockhand"
+      kuma.dockhand.http.url: "https://${APP_DOMAIN}"
+      kuma.dockhand.http.parent_name: "infrastructure"
+      # Dashboard (Homepage)
+      homepage.group: "Infrastructure"
+      homepage.name: "Dockhand"
+      homepage.icon: "dockhand"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Stack deployment"
+
+  postgres:
+    # Image switches users on startup, so no *hardened
+    <<: *base
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: dockhand
+      POSTGRES_USER: dockhand
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    pids_limit: 200
+    mem_limit: 512m
+
+secrets:
+  db_password:
+    environment: DB_PASSWORD
+
+volumes:
+  app-data:
+  postgres-data:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  internal:
+    internal: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

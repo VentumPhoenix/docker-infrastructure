@@ -1,0 +1,177 @@
+# Authentik – identity provider for SSO (OIDC) and forward auth in front of apps
+# Upstream: https://github.com/goauthentik/authentik
+# Requires: network npm-proxy (stack npmplus)
+# Updates: manual – updates run database migrations
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${APP_VERSION:?e.g. 2025.10}
+  - ${DB_PASSWORD:?}
+  - ${AUTHENTIK_SECRET_KEY:?}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    <<: *hardened
+    image: ghcr.io/goauthentik/server:${APP_VERSION}
+    command: server
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      AUTHENTIK_SECRET_KEY: file:///run/secrets/secret_key
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      # Database
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: file:///run/secrets/db_password
+      # Email (STARTTLS on port 587)
+      AUTHENTIK_EMAIL__HOST: ${EMAIL_HOST:-}
+      AUTHENTIK_EMAIL__PORT: ${EMAIL_PORT:-587}
+      AUTHENTIK_EMAIL__USERNAME: ${EMAIL_USERNAME:-}
+      AUTHENTIK_EMAIL__PASSWORD: ${EMAIL_PASSWORD:-}
+      AUTHENTIK_EMAIL__USE_TLS: "true"
+      AUTHENTIK_EMAIL__USE_SSL: "false"
+      AUTHENTIK_EMAIL__FROM: ${EMAIL_FROM:-}
+      AUTHENTIK_EMAIL__TIMEOUT: "10"
+    secrets:
+      - secret_key
+      - db_password
+    volumes:
+      - app-data:/data                  # shared with worker on purpose (media)
+      - app-templates:/templates        # shared with worker on purpose
+    networks:
+      - npm-proxy
+      - internal
+      - egress   # OAuth/social login sources, update check
+    healthcheck:
+      test: ["CMD", "ak", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    pids_limit: 1024
+    mem_limit: 1g
+    shm_size: 512mb
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "9000"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.authentik.http.name: "Authentik"
+      kuma.authentik.http.url: "https://${APP_DOMAIN}/-/health/live/"
+      kuma.authentik.http.parent_name: "security"
+      # Dashboard (Homepage)
+      homepage.group: "Security"
+      homepage.name: "Authentik"
+      homepage.icon: "authentik"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Single sign-on"
+
+  worker:
+    <<: *hardened
+    image: ghcr.io/goauthentik/server:${APP_VERSION}
+    command: worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      AUTHENTIK_SECRET_KEY: file:///run/secrets/secret_key
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      # Database
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: file:///run/secrets/db_password
+      # Email (STARTTLS on port 587)
+      AUTHENTIK_EMAIL__HOST: ${EMAIL_HOST:-}
+      AUTHENTIK_EMAIL__PORT: ${EMAIL_PORT:-587}
+      AUTHENTIK_EMAIL__USERNAME: ${EMAIL_USERNAME:-}
+      AUTHENTIK_EMAIL__PASSWORD: ${EMAIL_PASSWORD:-}
+      AUTHENTIK_EMAIL__USE_TLS: "true"
+      AUTHENTIK_EMAIL__USE_SSL: "false"
+      AUTHENTIK_EMAIL__FROM: ${EMAIL_FROM:-}
+      AUTHENTIK_EMAIL__TIMEOUT: "10"
+    secrets:
+      - secret_key
+      - db_password
+    volumes:
+      - app-data:/data
+      - app-templates:/templates
+      - worker-certs:/certs
+      # Optional: let Authentik manage outposts as containers. Needs write access to the
+      # Docker API, which socket-proxy deliberately doesn't allow (see README).
+      #- /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - internal
+      - egress   # sends email, downloads blueprints and outpost updates
+    healthcheck:
+      test: ["CMD", "ak", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    pids_limit: 1024
+    mem_limit: 1g
+    shm_size: 512mb
+
+  postgres:
+    # Image switches users on startup, so no *hardened
+    <<: *base
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    pids_limit: 200
+    mem_limit: 512m
+
+secrets:
+  secret_key:
+    environment: AUTHENTIK_SECRET_KEY
+  db_password:
+    environment: DB_PASSWORD
+
+volumes:
+  app-data:
+  app-templates:
+  worker-certs:
+  postgres-data:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  internal:
+    internal: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

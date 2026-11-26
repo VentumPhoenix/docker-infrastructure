@@ -1,0 +1,174 @@
+# NetBird – self-hosted WireGuard mesh VPN (combined server: management, signal, relay, STUN + dashboard)
+# Upstream: https://github.com/netbirdio/netbird, https://github.com/netbirdio/dashboard
+# Requires: network npm-proxy (stack npmplus)
+# Updates: manual – remote access to everything depends on it
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${NETBIRD_AUTH_SECRET:?openssl rand -hex 32}
+  - ${NETBIRD_STORE_ENCRYPTION_KEY:?openssl rand -base64 32 (keep the old one when migrating!)}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  # Dashboard (web UI). NPMplus routes "/" here and the API/gRPC paths to "server" (see labels).
+  app:
+    # nginx inside switches to its worker user, so no *hardened
+    <<: *base
+    image: netbirdio/dashboard:latest
+    init: true
+    environment:
+      # Endpoints (browser talks to these)
+      NETBIRD_MGMT_API_ENDPOINT: "https://${APP_DOMAIN}"
+      NETBIRD_MGMT_GRPC_API_ENDPOINT: "https://${APP_DOMAIN}"
+      # Login via the embedded IdP of the server (external IdPs like Authentik are added in the UI)
+      AUTH_AUDIENCE: netbird-dashboard
+      AUTH_CLIENT_ID: netbird-dashboard
+      AUTH_CLIENT_SECRET: ""
+      AUTH_AUTHORITY: "https://${APP_DOMAIN}/oauth2"
+      USE_AUTH0: "false"
+      AUTH_SUPPORTED_SCOPES: "openid profile email groups"
+      AUTH_REDIRECT_URI: /nb-auth
+      AUTH_SILENT_REDIRECT_URI: /nb-silent-auth
+      # TLS is done by NPMplus
+      NGINX_SSL_PORT: "443"
+      LETSENCRYPT_DOMAIN: none
+    networks:
+      - npm-proxy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || curl -fs -o /dev/null http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    pids_limit: 100
+    mem_limit: 128m
+    stop_grace_period: 3s
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "80"
+      npm.proxy.scheme: "http"
+      # API, gRPC and websocket paths go to the server, "/" stays with the dashboard.
+      # The server is resolved at request time, so NPMplus also starts while NetBird is down.
+      npm.proxy.advanced.config: |
+        client_header_timeout 1d;
+        client_body_timeout 1d;
+        resolver 127.0.0.11 valid=30s;
+        set $$netbird_server netbird-server:80;
+        location ~ ^/(relay|ws-proxy/) {
+          proxy_pass http://$$netbird_server;
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $$http_upgrade;
+          proxy_set_header Connection "Upgrade";
+          proxy_set_header Host $$host;
+          proxy_read_timeout 1d;
+        }
+        location ~ ^/(signalexchange\.SignalExchange|management\.(ManagementService|ProxyService))/ {
+          grpc_pass grpc://$$netbird_server;
+          grpc_read_timeout 1d;
+          grpc_send_timeout 1d;
+          grpc_socket_keepalive on;
+          grpc_set_header X-Real-IP $$remote_addr;
+          grpc_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+          grpc_set_header X-Forwarded-Proto https;
+        }
+        location ~ ^/(api|oauth2)/ {
+          proxy_pass http://$$netbird_server;
+          proxy_set_header Host $$host;
+          proxy_set_header X-Real-IP $$remote_addr;
+          proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto https;
+        }
+      # Monitoring (AutoKuma)
+      kuma.netbird.http.name: "NetBird"
+      kuma.netbird.http.url: "https://${APP_DOMAIN}"
+      kuma.netbird.http.parent_name: "infrastructure"
+      # Dashboard (Homepage)
+      homepage.group: "Infrastructure"
+      homepage.name: "NetBird"
+      homepage.icon: "netbird"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Mesh VPN"
+
+  # Combined server: management, signal, relay and STUN in one container
+  server:
+    <<: *hardened
+    image: netbirdio/netbird-server:latest
+    init: true
+    command: ["--config", "/etc/netbird/config.yaml"]
+    configs:
+      - source: server-config
+        target: /etc/netbird/config.yaml
+    volumes:
+      - server-data:/var/lib/netbird
+    ports:
+      # Exception: STUN is UDP and can't go through the reverse proxy
+      - "${NETBIRD_STUN_PORT:-3478}:3478/udp"
+    networks:
+      npm-proxy:
+        aliases:
+          - netbird-server   # unique name, NPMplus addresses the server by it
+      egress:   # GeoLite updates, external identity providers
+    healthcheck:   # no curl/wget in the image -> bash /dev/tcp against the health endpoint
+      test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/9000 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && grep -q " 200 " <&3']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    cap_add:
+      - NET_BIND_SERVICE   # listens on port 80 inside the container
+    pids_limit: 200
+    mem_limit: 512m
+    stop_grace_period: 30s
+
+configs:
+  # Contains the two secrets from .env. It ends up as a file in the container,
+  # not as an environment variable, so the socket proxy doesn't expose it.
+  server-config:
+    content: |
+      server:
+        listenAddress: ":80"
+        exposedAddress: "https://${APP_DOMAIN}:443"
+        stunPorts:
+          - 3478
+        metricsPort: 9090
+        healthcheckAddress: ":9000"
+        logLevel: "info"
+        logFile: "console"
+        authSecret: "${NETBIRD_AUTH_SECRET}"
+        dataDir: "/var/lib/netbird/"
+        disableAnonymousMetrics: true
+        auth:
+          issuer: "https://${APP_DOMAIN}/oauth2"
+          signKeyRefreshEnabled: true
+          dashboardRedirectURIs:
+            - "https://${APP_DOMAIN}/nb-auth"
+            - "https://${APP_DOMAIN}/nb-silent-auth"
+          cliRedirectURIs:
+            - "http://localhost:53000/"
+        store:
+          engine: "sqlite"
+          encryptionKey: "${NETBIRD_STORE_ENCRYPTION_KEY}"
+
+volumes:
+  server-data:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

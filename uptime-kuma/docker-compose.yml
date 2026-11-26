@@ -1,0 +1,110 @@
+# Uptime Kuma – uptime monitoring, monitors are created automatically from container labels (AutoKuma)
+# Upstream: https://github.com/louislam/uptime-kuma, https://github.com/BigBoot/AutoKuma
+# Requires: networks npm-proxy and socket-proxy (stack npmplus)
+# Updates: auto
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${KUMA_SERVICE_USER:?}
+  - ${KUMA_SERVICE_PASSWORD:?}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    # Not hardened yet: ping monitors need NET_RAW and the entrypoint switches users,
+    # cap_drop: ALL is untested
+    <<: *base
+    image: louislam/uptime-kuma:2
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      - app-data:/app/data
+    networks:
+      - npm-proxy
+      - internal
+      - egress   # checks external targets
+    healthcheck:   # same as the image's own healthcheck (Go binary, no curl needed)
+      test: ["CMD", "extra/healthcheck"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 180s
+    pids_limit: 200
+    mem_limit: 512m
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "3001"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.uptime-kuma.http.name: "Uptime Kuma"
+      kuma.uptime-kuma.http.url: "https://${APP_DOMAIN}"
+      kuma.uptime-kuma.http.parent_name: "monitoring"
+      # Dashboard (Homepage)
+      homepage.group: "Monitoring"
+      homepage.name: "Uptime Kuma"
+      homepage.icon: "uptime-kuma"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Uptime monitoring"
+
+  autokuma:
+    <<: *hardened
+    image: ghcr.io/bigboot/autokuma:latest
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      AUTOKUMA__KUMA__URL: http://app:3001
+      # Plain env vars (CONVENTIONS § 8 fallback)
+      AUTOKUMA__KUMA__USERNAME: ${KUMA_SERVICE_USER}
+      AUTOKUMA__KUMA__PASSWORD: ${KUMA_SERVICE_PASSWORD}
+      AUTOKUMA__DOCKER__HOSTS: tcp://${SOCKET_PROXY_HOST:-socket-proxy}:${SOCKET_PROXY_PORT:-2375}
+    volumes:
+      - autokuma-data:/data
+    networks:
+      - internal
+      - socket-proxy
+    healthcheck:
+      # No curl/wget in the image -> bash /dev/tcp: are Kuma and the socket proxy reachable?
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/app/3001 && exec 4<>/dev/tcp/${SOCKET_PROXY_HOST:-socket-proxy}/${SOCKET_PROXY_PORT:-2375}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    pids_limit: 100
+    mem_limit: 256m
+    labels:
+      # The four groups used by every stack (CONVENTIONS § 14), defined once here
+      kuma.infrastructure.group.name: "Infrastructure"
+      kuma.security.group.name: "Security"
+      kuma.monitoring.group.name: "Monitoring"
+      kuma.apps.group.name: "Apps"
+
+volumes:
+  app-data:
+  autokuma-data:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  socket-proxy:
+    name: ${SOCKET_PROXY_NETWORK:-socket-proxy}
+    external: true
+  internal:
+    internal: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

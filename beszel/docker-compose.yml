@@ -1,0 +1,67 @@
+# Beszel – lightweight server monitoring (hub)
+# Upstream: https://github.com/henrygd/beszel
+# Requires: network npm-proxy (stack npmplus)
+# Updates: auto
+
+x-required:
+  - ${APP_DOMAIN:?}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    <<: *hardened
+    image: henrygd/beszel:latest
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      APP_URL: "https://${APP_DOMAIN}"
+    volumes:
+      - app-data:/beszel_data
+    networks:
+      - npm-proxy
+      - egress   # connects to agents on other hosts
+    healthcheck:
+      test: ["CMD", "/beszel", "health", "--url", "http://127.0.0.1:8090"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    pids_limit: 200
+    mem_limit: 256m
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "8090"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.beszel.http.name: "Beszel"
+      kuma.beszel.http.url: "https://${APP_DOMAIN}/api/health"
+      kuma.beszel.http.parent_name: "monitoring"
+      # Dashboard (Homepage)
+      homepage.group: "Monitoring"
+      homepage.name: "Beszel"
+      homepage.icon: "beszel"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Server monitoring"
+
+volumes:
+  app-data:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

@@ -1,0 +1,79 @@
+# Homepage – dashboard with all services, filled automatically from container labels
+# Upstream: https://github.com/gethomepage/homepage
+# Requires: networks npm-proxy and socket-proxy (stack npmplus, variant authentik)
+# Updates: auto
+
+x-required:
+  - ${APP_DOMAIN:?}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    <<: *hardened
+    image: ghcr.io/gethomepage/homepage:latest
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      HOMEPAGE_ALLOWED_HOSTS: "${APP_DOMAIN}"
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    configs:
+      - source: app-docker
+        target: /app/config/docker.yaml
+    volumes:
+      - app-config:/app/config
+    networks:
+      - npm-proxy
+      - socket-proxy
+      - egress   # widgets and status checks via public URLs
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    pids_limit: 200
+    mem_limit: 512m
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "3000"
+      npm.proxy.scheme: "http"
+      # Authentik forward auth: Homepage has no login of its own
+      npm.proxy.auth_request: "authentik"
+      # Monitoring (AutoKuma)
+      kuma.homepage.http.name: "Homepage"
+      kuma.homepage.http.url: "https://${APP_DOMAIN}"
+      kuma.homepage.http.parent_name: "monitoring"
+
+configs:
+  app-docker:
+    content: |
+      my-docker:
+        host: ${SOCKET_PROXY_HOST:-socket-proxy}
+        port: ${SOCKET_PROXY_PORT:-2375}
+
+volumes:
+  app-config:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  socket-proxy:
+    name: ${SOCKET_PROXY_NETWORK:-socket-proxy}
+    external: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

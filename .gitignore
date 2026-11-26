@@ -1,0 +1,4 @@
+# Local environment files with secrets – only .env.example belongs in Git
+.env
+.env.*
+!.env.example

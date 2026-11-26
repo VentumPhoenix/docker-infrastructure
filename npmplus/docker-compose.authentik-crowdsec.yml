@@ -1,0 +1,385 @@
+# NPMplus – reverse proxy with certificates, Docker label sync and a filtered Docker socket (variant: Authentik forward auth + CrowdSec)
+# Upstream: https://github.com/ZoeyVid/NPMplus
+# Requires: nothing (this stack creates the shared networks npm-proxy and socket-proxy)
+# Updates: manual – critical infrastructure, every other stack depends on it
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${ACME_EMAIL:?}
+  - ${NPM_SERVICE_USER:?}
+  - ${NPM_SERVICE_PASSWORD:?}
+  - ${DOCKER_GID:?ls -ln /var/run/docker.sock shows the group ID}
+  # CrowdSec:
+  - ${CROWDSEC_BOUNCER_KEY:?openssl rand -hex 32}
+  # Authentik:
+  - ${AUTHENTIK_URL:?e.g. https://auth.example.com:443}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    <<: *hardened
+    image: ghcr.io/zoeyvid/npmplus:latest
+    depends_on:   # CrowdSec: bouncer config must exist before the start
+      crowdsec-init:
+        condition: service_completed_successfully
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      ACME_EMAIL: ${ACME_EMAIL}
+      # Initial admin = service user of docker-sync (plain env vars, CONVENTIONS § 8 fallback)
+      INITIAL_ADMIN_EMAIL: ${NPM_SERVICE_USER}
+      INITIAL_ADMIN_PASSWORD: ${NPM_SERVICE_PASSWORD}
+      # CrowdSec: write access logs that CrowdSec analyses
+      LOGROTATE: "true"
+      LOGROTATIONS: "7"
+      # Authentik: upstream for forward auth (label npm.proxy.auth_request)
+      AUTH_REQUEST_AUTHENTIK_UPSTREAM: ${AUTHENTIK_URL}
+    volumes:
+      - app-data:/data
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+      # Optional: emergency access to the admin UI, bound to a LAN IP only
+      #- "192.168.1.10:81:81"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # only for services running directly on the host
+    networks:
+      npm-proxy:
+        ipv4_address: ${NPM_PROXY_NET_PREFIX:-172.30.0}.2
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    cap_add:   # minimum according to the NPMplus docs (PUID=0)
+      - NET_BIND_SERVICE
+      - SETGID
+    pids_limit: 2048
+    mem_limit: 512m
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "81"
+      npm.proxy.scheme: "https"
+      # Monitoring (AutoKuma)
+      kuma.npmplus.http.name: "NPMplus"
+      kuma.npmplus.http.url: "https://${APP_DOMAIN}"
+      kuma.npmplus.http.parent_name: "infrastructure"
+      # Dashboard (Homepage)
+      homepage.group: "Infrastructure"
+      homepage.name: "NPMplus"
+      homepage.icon: "nginx-proxy-manager"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Reverse proxy"
+
+  # CrowdSec: one-shot job, writes URL, key and fail-open into /data/crowdsec/crowdsec.conf
+  crowdsec-init:
+    <<: *hardened
+    image: ghcr.io/zoeyvid/npmplus:latest   # same image -> ships the example config
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mkdir -p /data/crowdsec /data/nginx/logs
+        F=/data/crowdsec/crowdsec.conf
+        [ -s "$$F" ] || cp /etc/crowdsec.conf.example "$$F"
+        set_kv() {
+          if grep -q "^$$1=" "$$F"; then
+            sed -i "s|^$$1=.*|$$1=$$2|" "$$F"
+          else
+            echo "$$1=$$2" >> "$$F"
+          fi
+        }
+        set_kv ENABLED true
+        set_kv API_URL "http://$$CS_HOST:8080"
+        set_kv API_KEY "$$CS_API_KEY"
+        set_kv APPSEC_URL "http://$$CS_HOST:7422"
+        set_kv APPSEC_FAILURE_ACTION passthrough   # CrowdSec down -> let traffic through instead of blocking everything
+        echo "crowdsec.conf written"
+    environment:
+      CS_API_KEY: ${CROWDSEC_BOUNCER_KEY}
+      CS_HOST: ${NPM_PROXY_NET_PREFIX:-172.30.0}.4
+    volumes:
+      - app-data:/data
+    network_mode: none
+    read_only: true
+    restart: "no"   # one-shot job, overrides the anchor
+
+  # CrowdSec: analyses the NPMplus logs, WAF (AppSec), blocklist.
+  # No published ports, only NPMplus reaches 8080 (LAPI) and 7422 (AppSec).
+  crowdsec:
+    # Not hardened yet: runs as root, cap_drop: ALL is untested
+    <<: *base
+    image: crowdsecurity/crowdsec:latest
+    depends_on:
+      crowdsec-init:
+        condition: service_completed_successfully   # creates nginx/logs
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      USE_WAL: "true"
+      COLLECTIONS: "ZoeyVid/npmplus crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules"
+      # Plain env var: CrowdSec registers the bouncer from it (CONVENTIONS § 8 fallback)
+      BOUNCER_KEY_npmplus: ${CROWDSEC_BOUNCER_KEY}
+      # Optional: connect the instance to the CrowdSec Console
+      ENROLL_KEY: ${CROWDSEC_ENROLL_KEY:-}
+      ENROLL_INSTANCE_NAME: ${CROWDSEC_INSTANCE_NAME:-}
+    configs:
+      - source: crowdsec-acquis-npmplus
+        target: /etc/crowdsec/acquis.d/npmplus.yaml
+      - source: crowdsec-acquis-appsec
+        target: /etc/crowdsec/acquis.d/appsec.yaml
+    volumes:
+      - crowdsec-config:/etc/crowdsec
+      - crowdsec-data:/var/lib/crowdsec/data
+      - type: volume   # only the log folder, read-only (no database, no certificates)
+        source: app-data
+        target: /opt/npmplus/nginx/logs
+        read_only: true
+        volume:
+          subpath: nginx/logs
+    networks:
+      npm-proxy:
+        ipv4_address: ${NPM_PROXY_NET_PREFIX:-172.30.0}.4
+    healthcheck:   # LAPI answers + AppSec port is listening
+      test: ["CMD-SHELL", "cscli lapi status >/dev/null 2>&1 && wget -S -O /dev/null http://127.0.0.1:7422/ 2>&1 | grep -q 'HTTP/'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    pids_limit: 200
+    mem_limit: 512m
+
+  socket-proxy:
+    <<: *hardened
+    image: wollomatic/socket-proxy:1   # scratch image, signed, allowlist only
+    user: "65534"
+    group_add:
+      - "${DOCKER_GID}"
+    command:
+      - "-loglevel=info"
+      - "-listenip=0.0.0.0"
+      - "-allowfrom=${SOCKET_PROXY_NET_PREFIX:-172.31.0}.0/24"
+      # Read-only. containers/<name>/json also contains the environment variables
+      # of every container -> only trusted clients join this network.
+      - '-allowGET=/(v1\.\d+/)?(_ping|version|info|events|containers/json|containers/[a-zA-Z0-9][a-zA-Z0-9_.-]*/(json|stats))'
+      - '-allowHEAD=/(v1\.\d+/)?_ping'
+      - "-watchdoginterval=3600"   # socket gone (e.g. Docker update) -> restart
+      - "-stoponwatchdog"
+      - "-allowhealthcheck"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      socket-proxy:
+        ipv4_address: ${SOCKET_PROXY_NET_PREFIX:-172.31.0}.2
+    healthcheck:
+      test: ["CMD", "./healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    read_only: true
+    pids_limit: 50
+    mem_limit: 64m
+
+  docker-sync:
+    <<: *hardened
+    image: ghcr.io/ventumphoenix/npmplus-docker-sync:latest
+    depends_on:
+      app:
+        condition: service_healthy
+      socket-proxy:
+        condition: service_healthy
+    environment:
+      # Connection
+      DOCKER_HOST: tcp://${SOCKET_PROXY_NET_PREFIX:-172.31.0}.2:2375
+      NPM_URL: https://${NPM_PROXY_NET_PREFIX:-172.30.0}.2:81
+      NPM_INSECURE_SKIP_VERIFY: "true"   # internal self-signed certificate of the UI
+      NPM_IDENTITY: ${NPM_SERVICE_USER}
+      NPM_SECRET: ${NPM_SERVICE_PASSWORD}
+      NPM_FLAVOUR: npmplus
+      NPM_NETWORK: ${NPM_PROXY_NETWORK:-npm-proxy}
+      SYNC_INSTANCE_ID: npmplus-docker-sync
+      # Global defaults, container labels win
+      NPM_DEFAULT_GROUP: npmplus-docker-sync
+      NPM_PROXY_SSL_HSTS: "false"
+      NPM_PROXY_SSL_HSTS_SUBDOMAINS: "false"
+      NPM_PROXY_CACHING: "false"
+      NPM_CERTIFICATE_AUTO_CREATE: "true"
+      MIGRATE_FROM_REDTH: "false"   # true only when switching from Redth/npm-docker-sync
+      HEALTH_ADDR: 127.0.0.1:8080
+    networks:
+      npm-proxy:
+        ipv4_address: ${NPM_PROXY_NET_PREFIX:-172.30.0}.3
+      socket-proxy:
+    healthcheck:
+      test: ["CMD", "/npmplus-docker-sync", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    read_only: true
+    pids_limit: 100
+    mem_limit: 256m
+
+  # Adds targeted exceptions to Docker's ICC block (enable_icc=false):
+  #   npm-proxy:    only NPMplus (.2) opens connections, the sync (.3) only to NPMplus
+  #   socket-proxy: clients only to the socket proxy (.2)
+  # A missing rule means blocked (fail-closed). The healthcheck verifies everything.
+  firewall:
+    # Needs NET_ADMIN in the host network, so no *hardened
+    <<: *base
+    image: alpine:3.24
+    command:
+      - /bin/sh
+      - -c
+      - |
+        until apk add --no-cache iptables >/dev/null 2>&1; do
+          echo "apk add failed, retrying in 10s"
+          sleep 10
+        done
+        if iptables-nft -n -L DOCKER-USER >/dev/null 2>&1; then
+          IPT=iptables-nft
+        else
+          IPT=iptables-legacy
+        fi
+        echo "using $$IPT"
+        TAG="npmplus-stack"
+        D=/run/fw
+        mkdir -p $$D
+        rm -f $$D/status $$D/heartbeat $$D/canon
+
+        # Desired rules
+        cat > $$D/rules <<'EOF'
+        -i ${NPM_PROXY_BRIDGE:-br-npm} -o ${NPM_PROXY_BRIDGE:-br-npm} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        -i ${NPM_PROXY_BRIDGE:-br-npm} -o ${NPM_PROXY_BRIDGE:-br-npm} -s ${NPM_PROXY_NET_PREFIX:-172.30.0}.2 -j ACCEPT
+        -i ${NPM_PROXY_BRIDGE:-br-npm} -o ${NPM_PROXY_BRIDGE:-br-npm} -s ${NPM_PROXY_NET_PREFIX:-172.30.0}.3 -d ${NPM_PROXY_NET_PREFIX:-172.30.0}.2 -j ACCEPT
+        -i ${SOCKET_PROXY_BRIDGE:-br-sockprx} -o ${SOCKET_PROXY_BRIDGE:-br-sockprx} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        -i ${SOCKET_PROXY_BRIDGE:-br-sockprx} -o ${SOCKET_PROXY_BRIDGE:-br-sockprx} -d ${SOCKET_PROXY_NET_PREFIX:-172.31.0}.2 -j ACCEPT
+        EOF
+        WANT=$$(grep -c . $$D/rules)
+
+        # Healthcheck: no iptables, only status + age of the last run
+        cat > /usr/local/bin/fw-health <<'EOF'
+        #!/bin/sh
+        D=/run/fw
+        [ -s $$D/heartbeat ] || { echo "no run completed yet"; exit 1; }
+        age=$$(( $$(date +%s) - $$(cat $$D/heartbeat) ))
+        [ "$$age" -lt 300 ] || { echo "loop stuck: last run $${age}s ago"; exit 1; }
+        echo "$$(cat $$D/status) (last run $${age}s ago)"
+        grep -q '^OK' $$D/status
+        EOF
+        chmod +x /usr/local/bin/fw-health
+
+        cleanup() {
+          $$IPT -S DOCKER-USER | grep -- "--comment $$TAG" | sed 's/^-A/-D/' \
+            | while read -r rule; do eval "$$IPT $$rule"; done
+        }
+        apply() {
+          cleanup
+          while read -r r; do
+            [ -n "$$r" ] || continue
+            $$IPT -I DOCKER-USER $$r -m comment --comment "$$TAG"
+          done < $$D/rules
+          # How iptables prints our own rules = desired state for the comparison
+          $$IPT -S DOCKER-USER | grep -- "--comment $$TAG" > $$D/canon
+        }
+
+        apply
+        trap 'echo "removing rules"; cleanup; exit 0' TERM INT
+
+        while true; do
+          # 1 call: own rules complete, not duplicated and at the top?
+          cur=$$($$IPT -S DOCKER-USER | grep '^-A')
+          n=$$(echo "$$cur" | grep -c -- "--comment $$TAG")
+          top=$$(echo "$$cur" | head -n "$$WANT")
+          if [ "$$n" -ne "$$WANT" ] || [ "$$top" != "$$(cat $$D/canon)" ]; then
+            echo "rules missing, duplicated or not at the top ($$n/$$WANT) - reapplying"
+            apply
+          fi
+
+          # 2 calls: Docker's ICC DROP present?
+          msg=""
+          icc=$$(for c in DOCKER-FORWARD FORWARD; do $$IPT -S $$c 2>/dev/null; done)
+          for br in ${NPM_PROXY_BRIDGE:-br-npm} ${SOCKET_PROXY_BRIDGE:-br-sockprx}; do
+            [ -d /sys/class/net/$$br ] || msg="$$msg bridge $$br missing;"
+            echo "$$icc" | grep -q -- "-i $$br -o $$br -j DROP" || msg="$$msg ICC DROP $$br missing;"
+          done
+          [ "$$(grep -c . $$D/canon)" -eq "$$WANT" ] || msg="$$msg only $$(grep -c . $$D/canon)/$$WANT rules set;"
+
+          if [ -z "$$msg" ]; then
+            echo "OK: $$WANT rules active ($$IPT), ICC DROP present" > $$D/status
+          else
+            echo "ERROR:$$msg" > $$D/status
+            echo "ERROR:$$msg"
+          fi
+          date +%s > $$D/heartbeat
+          sleep 60 &
+          wait $$!
+        done
+    network_mode: host
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/fw-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+    cap_add:
+      - NET_ADMIN   # manages iptables rules in the DOCKER-USER chain
+    pids_limit: 50
+    mem_limit: 64m
+    stop_grace_period: 120s   # cleanup needs several slow iptables calls
+
+configs:   # CrowdSec: acquisition inline, no files on the host
+  crowdsec-acquis-npmplus:
+    content: |
+      filenames:
+        - /opt/npmplus/nginx/logs/*.log
+      labels:
+        type: npmplus
+  crowdsec-acquis-appsec:
+    content: |
+      source: appsec
+      listen_addr: 0.0.0.0:7422
+      appsec_config: crowdsecurity/appsec-default
+      labels:
+        type: appsec
+
+volumes:
+  app-data:
+  crowdsec-config:   # CrowdSec
+  crowdsec-data:     # CrowdSec
+
+networks:
+  npm-proxy:   # apps join this network so NPMplus can reach them
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: ${NPM_PROXY_BRIDGE:-br-npm}
+      com.docker.network.bridge.enable_icc: "false"
+    ipam:
+      config:
+        - subnet: ${NPM_PROXY_NET_PREFIX:-172.30.0}.0/24
+          ip_range: ${NPM_PROXY_NET_PREFIX:-172.30.0}.128/25   # fixed IPs below .128
+  socket-proxy:   # internal: no way out
+    name: ${SOCKET_PROXY_NETWORK:-socket-proxy}
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.name: ${SOCKET_PROXY_BRIDGE:-br-sockprx}
+      com.docker.network.bridge.enable_icc: "false"
+    ipam:
+      config:
+        - subnet: ${SOCKET_PROXY_NET_PREFIX:-172.31.0}.0/24
+          ip_range: ${SOCKET_PROXY_NET_PREFIX:-172.31.0}.128/25   # fixed IPs below .128

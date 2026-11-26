@@ -1,0 +1,97 @@
+# Beszel – lightweight server monitoring (hub) (variant: agent for the local host)
+# Upstream: https://github.com/henrygd/beszel
+# Requires: network npm-proxy (stack npmplus)
+# Updates: auto
+
+x-required:
+  - ${APP_DOMAIN:?}
+  # Agent:
+  - ${BESZEL_AGENT_KEY:?public key from the Beszel UI}
+  - ${BESZEL_AGENT_TOKEN:?token from the Beszel UI}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    <<: *hardened
+    image: henrygd/beszel:latest
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      APP_URL: "https://${APP_DOMAIN}"
+    volumes:
+      - app-data:/beszel_data
+      # Agent: hub talks to the local agent through a unix socket
+      - agent-socket:/beszel_socket
+    networks:
+      - npm-proxy
+      - egress   # connects to agents on other hosts
+    healthcheck:
+      test: ["CMD", "/beszel", "health", "--url", "http://127.0.0.1:8090"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    pids_limit: 200
+    mem_limit: 256m
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "8090"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.beszel.http.name: "Beszel"
+      kuma.beszel.http.url: "https://${APP_DOMAIN}/api/health"
+      kuma.beszel.http.parent_name: "monitoring"
+      # Dashboard (Homepage)
+      homepage.group: "Monitoring"
+      homepage.name: "Beszel"
+      homepage.icon: "beszel"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Server monitoring"
+
+  # Agent: collects host and container metrics of this host
+  agent:
+    <<: *hardened
+    image: henrygd/beszel-agent:latest
+    environment:
+      LISTEN: /beszel_socket/beszel.sock
+      HUB_URL: "https://${APP_DOMAIN}"
+      KEY: ${BESZEL_AGENT_KEY}
+      TOKEN: ${BESZEL_AGENT_TOKEN}
+      # Host network has no Docker DNS, so the socket proxy is reached by its fixed IP
+      DOCKER_HOST: tcp://${SOCKET_PROXY_NET_PREFIX:-172.31.0}.2:${SOCKET_PROXY_PORT:-2375}
+    volumes:
+      - agent-data:/var/lib/beszel-agent
+      - agent-socket:/beszel_socket
+    network_mode: host   # real network statistics of the host
+    healthcheck:
+      test: ["CMD", "/agent", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    pids_limit: 100
+    mem_limit: 128m
+
+volumes:
+  app-data:
+  agent-data:     # Agent
+  agent-socket:   # Agent
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

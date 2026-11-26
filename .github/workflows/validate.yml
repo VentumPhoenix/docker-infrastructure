@@ -1,0 +1,47 @@
+# Validates every compose file with its .env.example, so broken files are caught
+# before Dockhand deploys them. Errors fail the run, warnings are shown as annotations.
+name: Validate stacks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docker compose config
+        run: |
+          status=0
+          for file in */docker-compose*.yml; do
+            if [ ! -s "$file" ]; then
+              echo "::notice file=$file::skipped (empty file)"
+              continue
+            fi
+            dir=$(dirname "$file")
+
+            # .env.example with dummy values for empty required variables
+            env=$(mktemp)
+            if [ -f "$dir/.env.example" ]; then
+              sed -E 's/^([A-Z0-9_]+)=$/\1=ci-dummy/' "$dir/.env.example" > "$env"
+            fi
+            # Variables of variants are commented out in .env.example, so set them here
+            for var in AUTHENTIK_URL CROWDSEC_BOUNCER_KEY BESZEL_AGENT_KEY BESZEL_AGENT_TOKEN; do
+              grep -q "^$var=" "$env" || echo "$var=ci-dummy" >> "$env"
+            done
+
+            if out=$(docker compose -f "$file" --env-file "$env" config -q 2>&1); then
+              if [ -n "$out" ]; then
+                echo "::warning file=$file::$(echo "$out" | tr '\n' ' ')"
+              fi
+              echo "ok    $file"
+            else
+              echo "::error file=$file::$(echo "$out" | tr '\n' ' ')"
+              echo "FAIL  $file"
+              status=1
+            fi
+            rm -f "$env"
+          done
+          exit $status

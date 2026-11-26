@@ -1,0 +1,127 @@
+# SillyTavern – chat frontend for LLMs, outgoing API requests through a VPN (Gluetun)
+# Upstream: https://github.com/SillyTavern/SillyTavern, https://github.com/qdm12/gluetun
+# Requires: network npm-proxy (stack npmplus, variant authentik)
+# Updates: auto
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${VPN_WIREGUARD_PRIVATE_KEY:?}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    <<: *hardened
+    image: ghcr.io/sillytavern/sillytavern:latest
+    depends_on:
+      vpn:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      NODE_ENV: production
+      FORCE_COLOR: "1"
+      SILLYTAVERN_HEARTBEATINTERVAL: "30"
+    volumes:
+      - app-config:/home/node/app/config
+      - app-data:/home/node/app/data
+      - app-plugins:/home/node/app/plugins
+      - app-extensions:/home/node/app/public/scripts/extensions/third-party
+    # Optional: name of an LLM server without DNS entry (e.g. in NetBird)
+    #extra_hosts:
+    #  - "llm-server:10.0.0.20"
+    networks:
+      - npm-proxy
+      - internal
+      - egress   # LLM server in the LAN / NetBird
+    healthcheck:
+      test: ["CMD", "node", "src/healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    pids_limit: 200
+    mem_limit: 1g
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "8000"
+      npm.proxy.scheme: "http"
+      # Authentik forward auth: protects the UI and the stored API keys
+      npm.proxy.auth_request: "authentik"
+      # Long-running streamed answers and large uploads
+      npm.proxy.advanced.config: |
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        client_max_body_size 0;
+      # Monitoring (AutoKuma)
+      kuma.sillytavern.http.name: "SillyTavern"
+      kuma.sillytavern.http.url: "https://${APP_DOMAIN}"
+      kuma.sillytavern.http.parent_name: "apps"
+      # Dashboard (Homepage)
+      homepage.group: "Apps"
+      homepage.name: "SillyTavern"
+      homepage.icon: "sillytavern"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "LLM chat"
+
+  # HTTP proxy through the VPN on vpn:8888, set as request proxy in SillyTavern's config.yaml
+  vpn:
+    # Needs NET_ADMIN and /dev/net/tun for the tunnel, so no *hardened
+    <<: *base
+    image: qmcgaw/gluetun:latest
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      VPN_SERVICE_PROVIDER: ${VPN_SERVICE_PROVIDER:-protonvpn}
+      VPN_TYPE: wireguard
+      SERVER_COUNTRIES: ${VPN_SERVER_COUNTRIES:-}
+      HTTPPROXY: "on"
+      HTTPPROXY_LISTENING_ADDRESS: ":8888"
+    secrets:
+      - wireguard_private_key   # Gluetun reads /run/secrets/wireguard_private_key by itself
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      - internal
+      - egress   # VPN tunnel
+    healthcheck:   # same as the image's own healthcheck: is the tunnel up?
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    cap_add:
+      - NET_ADMIN   # creates the tunnel and its firewall rules
+    pids_limit: 100
+    mem_limit: 256m
+
+secrets:
+  wireguard_private_key:
+    environment: VPN_WIREGUARD_PRIVATE_KEY
+
+volumes:
+  app-config:
+  app-data:
+  app-plugins:
+  app-extensions:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  internal:
+    internal: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
