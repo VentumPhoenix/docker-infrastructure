@@ -1,0 +1,64 @@
+# Hawser – agent that lets Dockhand manage the Docker host it runs on (edge mode, no inbound port)
+# Upstream: https://github.com/Finsys/hawser
+# Requires: nothing (runs on remote hosts, connects out to Dockhand)
+# Updates: manual – Dockhand deploys through it, it can't update itself reliably
+
+x-required:
+  - ${HAWSER_SERVER_URL:?wss://… URL shown in Dockhand when adding the environment}
+  - ${HAWSER_TOKEN:?token shown in Dockhand when adding the environment}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    <<: *hardened
+    image: ghcr.io/finsys/hawser:latest
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      # Edge mode: Hawser opens an outbound WebSocket to Dockhand, nothing listens publicly
+      DOCKHAND_SERVER_URL: ${HAWSER_SERVER_URL}
+      TOKEN_FILE: /run/secrets/token
+      AGENT_NAME: ${HAWSER_AGENT_NAME:-}
+      # Health endpoint only, bound to the container itself
+      BIND_ADDRESS: 127.0.0.1
+      PORT: "2376"
+      # Same path inside and outside, so relative bind mounts of deployed stacks resolve
+      STACKS_DIR: ${HAWSER_STACKS_DIR:-/opt/stacks}
+    secrets:
+      - token
+    volumes:
+      # Exception: like Dockhand, Hawser needs full write access to the Docker API (see README)
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Exception: stack folders on the host, same path inside and outside
+      - ${HAWSER_STACKS_DIR:-/opt/stacks}:${HAWSER_STACKS_DIR:-/opt/stacks}
+    networks:
+      egress:   # outbound WebSocket to Dockhand
+        gw_priority: 1   # default route via egress
+    healthcheck:   # same as the image's own healthcheck
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2376/_hawser/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    pids_limit: 500
+    mem_limit: 512m
+
+secrets:
+  token:
+    environment: HAWSER_TOKEN
+
+networks:
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

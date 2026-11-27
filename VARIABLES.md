@@ -124,6 +124,10 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `NETBIRD_STORE_ENCRYPTION_KEY` | ✅ | – | Encryption key of the NetBird database. Generate: `openssl rand -base64 32`. Never change it after setup | netbird |
 | `NETBIRD_STUN_PORT` | – | `3478` | Host port (UDP) for STUN | netbird |
 | `RCLONE_LOG_LEVEL` | – | `INFO` | Log level of rclone (`DEBUG`, `INFO`, `NOTICE`, `ERROR`) | nextcloud |
+| `HAWSER_SERVER_URL` | ✅ | – | WebSocket URL of Dockhand for this agent (`wss://…`), shown in Dockhand | hawser |
+| `HAWSER_TOKEN` | ✅ | – | Token of this agent, shown in Dockhand | hawser |
+| `HAWSER_AGENT_NAME` | – | (empty) | Name of the host in Dockhand | hawser |
+| `HAWSER_STACKS_DIR` | – | `/opt/stacks` | Folder on the host with the stack folders Dockhand deploys there | hawser |
 
 ## Infrastructure (`npmplus` stack only)
 

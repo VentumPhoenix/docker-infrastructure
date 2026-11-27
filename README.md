@@ -12,6 +12,7 @@ The repository is public to back up and version the configuration, and as inspir
 | [dockhand](dockhand/) | Infrastructure | Deploys and updates all other stacks | – |
 | [netbird](netbird/) | Infrastructure | Self-hosted WireGuard mesh VPN | – |
 | [rdpgw](rdpgw/) | Infrastructure | Remote desktop gateway (RDP over HTTPS), login via Authentik | – |
+| [hawser](hawser/) | Infrastructure | Dockhand agent for other Docker hosts (edge mode, no open port) | – |
 | [authentik](authentik/) | Security | Single sign-on (OIDC) and forward auth | – |
 | [vaultwarden](vaultwarden/) | Security | Bitwarden-compatible password manager | – |
 | [uptime-kuma](uptime-kuma/) | Monitoring | Uptime monitoring, monitors created from labels (AutoKuma) | – |

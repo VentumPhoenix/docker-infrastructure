@@ -597,7 +597,7 @@ networks:
 
 ### Docker socket
 
-**`/var/run/docker.sock` is never mounted directly**, except in `socket-proxy` itself and in **Dockhand**. Dockhand deploys stacks and needs write access, which the socket proxy deliberately doesn't allow. No other service gets this exception. Anything that needs the Docker API (AutoKuma, Homepage, Beszel agent …) joins the `socket-proxy` network and uses:
+**`/var/run/docker.sock` is never mounted directly**, except in `socket-proxy` itself, in **Dockhand** and in its agent **Hawser**. They deploy stacks and need write access, which the socket proxy deliberately doesn't allow. No other service gets this exception. Anything that needs the Docker API (AutoKuma, Homepage, Beszel agent …) joins the `socket-proxy` network and uses:
 
 ```yaml
 DOCKER_HOST: tcp://${SOCKET_PROXY_HOST:-socket-proxy}:${SOCKET_PROXY_PORT:-2375}
