@@ -9,16 +9,14 @@ The repository is public to back up and version the configuration, and as inspir
 | Stack | Group | What it does | Variants |
 |---|---|---|---|
 | [npmplus](npmplus/) | Infrastructure | Reverse proxy, certificates, Docker label sync, socket proxy, firewall. **Deploy first.** | `authentik`, `crowdsec`, `authentik-crowdsec` |
-| [dockhand](dockhand/) | Infrastructure | Deploys and updates all other stacks | – |
+| [dockhand](dockhand/) | Infrastructure | Deploys and updates all other stacks. Hawser agent for other hosts included | `hawser` (other hosts) |
 | [netbird](netbird/) | Infrastructure | Self-hosted WireGuard mesh VPN | – |
 | [rdpgw](rdpgw/) | Infrastructure | Remote desktop gateway (RDP over HTTPS), login via Authentik | – |
-| [hawser](hawser/) | Infrastructure | Dockhand agent for other Docker hosts (edge mode, no open port) | – |
 | [authentik](authentik/) | Security | Single sign-on (OIDC) and forward auth | – |
 | [vaultwarden](vaultwarden/) | Security | Bitwarden-compatible password manager | – |
 | [uptime-kuma](uptime-kuma/) | Monitoring | Uptime monitoring, monitors created from labels (AutoKuma) | – |
-| [beszel](beszel/) | Monitoring | Server and container monitoring | `agent` |
+| [beszel](beszel/) | Monitoring | Server and container monitoring | `agent`, `remote-agent` (other hosts) |
 | [homepage](homepage/) | Monitoring | Dashboard, filled from labels | – |
-| [beszel-agent](beszel-agent/) | Monitoring | Beszel agent for other hosts, with its own read-only socket proxy | – |
 | [influxdb](influxdb/) | Monitoring | Time series database for metrics | – |
 | [telegraf](telegraf/) | Monitoring | Collects host and container metrics into InfluxDB | – |
 | [nextcloud](nextcloud/) | Apps | Files, office (Collabora), whiteboard, virus scan, SFTP | – |

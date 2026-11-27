@@ -1,6 +1,6 @@
-# Beszel agent – reports host and container metrics of this host to a Beszel hub
+# Beszel – agent for OTHER hosts: reports host and container metrics to the Beszel hub
 # Upstream: https://github.com/henrygd/beszel
-# Requires: nothing (runs on any host, the hub connects to it)
+# Requires: nothing (runs on another host, the hub connects to it). For the hub's own host use docker-compose.agent.yml.
 # Updates: auto
 
 x-required:
@@ -23,7 +23,7 @@ x-hardened: &hardened
     - ALL
 
 services:
-  app:
+  agent:
     <<: *hardened
     image: henrygd/beszel-agent:latest
     depends_on:
@@ -40,7 +40,7 @@ services:
       - agent_key
       - agent_token
     volumes:
-      - app-data:/var/lib/beszel-agent
+      - agent-data:/var/lib/beszel-agent
       # Optional: monitor more disks, one folder per disk (see README)
       #- /mnt/disk1/.beszel:/extra-filesystems/sdb1:ro
     network_mode: host   # real network statistics of the host; the hub connects to LISTEN
@@ -94,7 +94,7 @@ secrets:
     environment: BESZEL_AGENT_TOKEN
 
 volumes:
-  app-data:
+  agent-data:
 
 networks:
   egress:

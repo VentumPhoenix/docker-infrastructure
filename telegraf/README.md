@@ -17,4 +17,4 @@ Collects metrics of the host (CPU, memory, disks, network, processes) and of all
 - **Token as a file:** the `secretstores.docker` plugin reads it from `/run/secrets/influxdb_token`. It never appears as an environment variable.
 - **Config in the compose file:** `telegraf.conf` is defined inline (`configs:`). Add more inputs there.
 - **Healthcheck:** `outputs.health` answers on `127.0.0.1:8099` (`TELEGRAF_HEALTH_PORT`) of the host. Change the port if it's taken.
-- **Other hosts:** this stack relies on the socket proxy of the `npmplus` stack. On other hosts, remove `[[inputs.docker]]` or add a socket proxy like in [beszel-agent](../beszel-agent/).
+- **Other hosts:** this stack relies on the socket proxy of the `npmplus` stack. On other hosts, remove `[[inputs.docker]]` or add a socket proxy like in [beszel/docker-compose.remote-agent.yml](../beszel/docker-compose.remote-agent.yml).

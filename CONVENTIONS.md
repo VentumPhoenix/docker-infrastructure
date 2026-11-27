@@ -81,6 +81,7 @@ The layers in detail:
 <stack>/
 ├── docker-compose.yml            # required
 ├── docker-compose.<variant>.yml  # optional, e.g. docker-compose.crowdsec.yml
+├── docker-compose.<component>.yml # optional, runs on OTHER hosts, e.g. docker-compose.hawser.yml
 ├── .env.example                  # required as soon as the stack uses variables
 ├── .env                          # local only, NEVER commit (.gitignore)
 └── README.md                     # required, see "Stack README" below
@@ -129,6 +130,20 @@ New features get a short, lowercase name and are added to this table.
 **Authentik in front of an app is not a variant**, just the label `npm.proxy.auth_request: "authentik"` in the base file (see § 14). If NPMplus runs without the `authentik` variant, `npmplus-docker-sync` ignores the label without errors.
 
 > ⚠️ Ignoring the label means the app is then reachable **without** a login. That's why an app with no login of its own states in its header comment that it requires the `authentik` variant of NPMplus.
+
+### Components for other hosts
+
+Some stacks have a part that runs on **other** hosts: an agent, collector or worker that belongs to the stack (e.g. Hawser for Dockhand, the Beszel agent for Beszel). It lives **in the parent stack's folder**, not in a folder of its own:
+
+| Rule | Example |
+|---|---|
+| File name `docker-compose.<component>.yml` | `dockhand/docker-compose.hawser.yml`, `beszel/docker-compose.remote-agent.yml` |
+| Service named after the component, not `app` | `hawser`, `agent` → container `dockhand-hawser-1` on the other host |
+| Volumes named after that service | `agent-data` |
+| Variables in the parent's `.env.example`, block `REQUIRED FOR docker-compose.<component>.yml` | `HAWSER_TOKEN` |
+| Documented in the parent's `README.md`: file table with a "Runs on" column, plus a section for the component | see `dockhand/README.md` |
+
+It is not a variant: a variant replaces the base on the same host, a component runs **in addition**, somewhere else. In the root README's stack table, it appears in the parent's row.
 
 ### Stack README
 

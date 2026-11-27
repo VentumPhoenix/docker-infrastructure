@@ -23,12 +23,12 @@ jobs:
             dir=$(dirname "$file")
 
             # .env.example with dummy values for empty required variables.
-            # Variables of the "REQUIRED FOR VARIANT" blocks are commented out, so they are
-            # uncommented here (everything up to the OPTIONAL block).
+            # Variables of the "REQUIRED FOR …" blocks (variants and files for other hosts) are
+            # commented out, so they are uncommented here (everything up to the OPTIONAL block).
             env=$(mktemp)
             if [ -f "$dir/.env.example" ]; then
               awk '
-                /REQUIRED FOR VARIANT/ { variant = 1 }
+                /REQUIRED FOR /        { variant = 1 }
                 /OPTIONAL/             { variant = 0 }
                 variant && /^#[A-Z0-9_]+=/ { sub(/^#/, "") }
                 { print }

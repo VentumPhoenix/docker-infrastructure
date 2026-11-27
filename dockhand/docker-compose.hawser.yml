@@ -1,6 +1,6 @@
-# Hawser – agent that lets Dockhand manage the Docker host it runs on (edge mode, no inbound port)
+# Dockhand – Hawser agent for OTHER hosts: lets Dockhand manage the host it runs on (edge mode, no inbound port)
 # Upstream: https://github.com/Finsys/hawser
-# Requires: nothing (runs on remote hosts, connects out to Dockhand)
+# Requires: nothing (runs on another host, connects out to Dockhand). Deploy it there, not next to Dockhand.
 # Updates: manual – Dockhand deploys through it, it can't update itself reliably
 
 x-required:
@@ -21,7 +21,7 @@ x-hardened: &hardened
     - ALL
 
 services:
-  app:
+  hawser:
     <<: *hardened
     image: ghcr.io/finsys/hawser:latest
     environment:
