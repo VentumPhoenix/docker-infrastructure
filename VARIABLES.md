@@ -17,8 +17,8 @@ Every variable used in any stack is listed here. **Same purpose → same name**,
 | `APP_DOMAIN` | ✅ | – | Public domain of the stack's main service, without `https://` | every stack |
 | `APP_VERSION` | ◐ if used | – | Image tag, only when several services share one image | authentik, nextcloud |
 | `TZ` | – | `Europe/Berlin` | Time zone of the containers | every stack except hastebin and netbird |
-| `PUID` | – | `1000` | User ID the app runs as (only images that support it) | homepage, paperless, heimdall |
-| `PGID` | – | `1000` | Group ID the app runs as | homepage, paperless, heimdall |
+| `PUID` | – | `1000` | User ID the app runs as (only images that support it) | homepage, paperless, heimdall, mealie |
+| `PGID` | – | `1000` | Group ID the app runs as | homepage, paperless, heimdall, mealie |
 
 ## Additional domains
 
@@ -44,7 +44,7 @@ These must have the **same value in every stack**.
 
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
-| `DB_PASSWORD` | ✅ | – | Password of the stack's own database. Generate: `openssl rand -hex 32` | authentik, dockhand, nextcloud, paperless |
+| `DB_PASSWORD` | ✅ | – | Password of the stack's own database. Generate: `openssl rand -hex 32` | authentik, dockhand, nextcloud, paperless, mealie |
 | `DB_ROOT_PASSWORD` | ✅ | – | Root password of the database, only for images that need one. Generate: `openssl rand -hex 32` | nextcloud |
 
 DB name and DB user are not variables. They are hard-coded in the compose file (= stack name).
@@ -53,11 +53,11 @@ DB name and DB user are not variables. They are hard-coded in the compose file (
 
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
-| `EMAIL_HOST` | ◐ if the app should send email | – | SMTP server | authentik, vaultwarden |
-| `EMAIL_PORT` | – | `587` | SMTP port. 587 = STARTTLS, which every stack uses | authentik, vaultwarden |
-| `EMAIL_USERNAME` | – | – | SMTP login | authentik, vaultwarden |
-| `EMAIL_PASSWORD` | – | – | SMTP password | authentik, vaultwarden |
-| `EMAIL_FROM` | – | – | Sender address, e.g. `Authentik <auth@example.com>` | authentik, vaultwarden |
+| `EMAIL_HOST` | ◐ if the app should send email | – | SMTP server | authentik, vaultwarden, mealie |
+| `EMAIL_PORT` | – | `587` | SMTP port. 587 = STARTTLS, which every stack uses | authentik, vaultwarden, mealie |
+| `EMAIL_USERNAME` | – | – | SMTP login | authentik, vaultwarden, mealie |
+| `EMAIL_PASSWORD` | – | – | SMTP password | authentik, vaultwarden, mealie |
+| `EMAIL_FROM` | – | – | Sender address, e.g. `Authentik <auth@example.com>` | authentik, vaultwarden, mealie |
 
 ## Shared services
 
@@ -154,6 +154,7 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `TELEGRAF_HEALTH_PORT` | – | `8099` | Localhost port of the health endpoint (host network) | telegraf |
 | `GRAFANA_ADMIN_USER` | – | `admin` | Local admin user | grafana |
 | `GRAFANA_ADMIN_PASSWORD` | ✅ | – | Password of the local admin user, only used when the user is created | grafana |
+| `MEALIE_ALLOW_SIGNUP` | – | `false` | Allow anyone who can reach the domain to create an account | mealie |
 
 ## Infrastructure (`npmplus` stack only)
 

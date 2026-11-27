@@ -25,6 +25,7 @@ The repository is public to back up and version the configuration, and as inspir
 | [paperless](paperless/) | Apps | Document management with OCR and full-text search | `tika` |
 | [sillytavern](sillytavern/) | Apps | LLM chat frontend, API requests through a VPN | – |
 | [hastebin](hastebin/) | Apps | Pastebin for code snippets | – |
+| [mealie](mealie/) | Apps | Recipe manager with meal planner and shopping lists | – |
 
 Every stack folder contains a `docker-compose.yml`, a `.env.example` and a `README.md`.
 

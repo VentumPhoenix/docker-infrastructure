@@ -1,0 +1,124 @@
+# Mealie – recipe manager with meal planner and shopping lists, imports recipes from any URL
+# Upstream: https://github.com/mealie-recipes/mealie
+# Requires: network npm-proxy (stack npmplus)
+# Updates: manual – app + database, updates run migrations
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${DB_PASSWORD:?}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    # Entrypoint fixes ownership and drops to PUID/PGID (gosu), so no *hardened
+    <<: *base
+    image: ghcr.io/mealie-recipes/mealie:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      BASE_URL: "https://${APP_DOMAIN}"
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      ALLOW_SIGNUP: ${MEALIE_ALLOW_SIGNUP:-false}
+      # Database
+      DB_ENGINE: postgres
+      POSTGRES_SERVER: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: mealie
+      POSTGRES_USER: mealie
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      # Email (STARTTLS). Optional secret, so a plain env var (CONVENTIONS § 8)
+      SMTP_HOST: ${EMAIL_HOST:-}
+      SMTP_PORT: ${EMAIL_PORT:-587}
+      SMTP_AUTH_STRATEGY: TLS
+      SMTP_USER: ${EMAIL_USERNAME:-}
+      SMTP_PASSWORD: ${EMAIL_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${EMAIL_FROM:-}
+      SMTP_FROM_NAME: Mealie
+    secrets:
+      - db_password
+    volumes:
+      - app-data:/app/data
+    networks:
+      npm-proxy:
+      internal:
+      egress:   # imports recipes from other websites, sends email
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
+    healthcheck:   # same request as the image's own healthcheck.sh
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://127.0.0.1:9000/api/app/about"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    pids_limit: 300
+    mem_limit: 1g
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "9000"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.mealie.http.name: "Mealie"
+      kuma.mealie.http.url: "https://${APP_DOMAIN}/api/app/about"
+      kuma.mealie.http.parent_name: "apps"
+      # Dashboard (Homepage)
+      homepage.group: "Apps"
+      homepage.name: "Mealie"
+      homepage.icon: "mealie"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Recipes"
+
+  postgres:
+    # Image switches users on startup, so no *hardened
+    <<: *base
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: mealie
+      POSTGRES_USER: mealie
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    pids_limit: 200
+    mem_limit: 512m
+
+secrets:
+  db_password:
+    environment: DB_PASSWORD
+
+volumes:
+  app-data:
+  postgres-data:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  internal:
+    internal: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
