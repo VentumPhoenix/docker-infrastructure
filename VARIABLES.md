@@ -17,8 +17,8 @@ Every variable used in any stack is listed here. **Same purpose → same name**,
 | `APP_DOMAIN` | ✅ | – | Public domain of the stack's main service, without `https://` | every stack |
 | `APP_VERSION` | ◐ if used | – | Image tag, only when several services share one image | authentik, nextcloud |
 | `TZ` | – | `Europe/Berlin` | Time zone of the containers | every stack except hastebin and netbird |
-| `PUID` | – | `1000` | User ID the app runs as (only images that support it) | homepage, paperless |
-| `PGID` | – | `1000` | Group ID the app runs as | homepage, paperless |
+| `PUID` | – | `1000` | User ID the app runs as (only images that support it) | homepage, paperless, heimdall |
+| `PGID` | – | `1000` | Group ID the app runs as | homepage, paperless, heimdall |
 
 ## Additional domains
 

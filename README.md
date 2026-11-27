@@ -20,6 +20,7 @@ The repository is public to back up and version the configuration, and as inspir
 | [influxdb](influxdb/) | Monitoring | Time series database for metrics | – |
 | [telegraf](telegraf/) | Monitoring | Collects host and container metrics into InfluxDB | – |
 | [grafana](grafana/) | Monitoring | Dashboards for metrics (InfluxDB) | – |
+| [heimdall](heimdall/) | Monitoring | Start page with tiles for all web apps | – |
 | [nextcloud](nextcloud/) | Apps | Files, office (Collabora), whiteboard, virus scan, SFTP | – |
 | [paperless](paperless/) | Apps | Document management with OCR and full-text search | `tika` |
 | [sillytavern](sillytavern/) | Apps | LLM chat frontend, API requests through a VPN | – |
