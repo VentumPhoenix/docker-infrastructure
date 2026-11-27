@@ -81,7 +81,7 @@ The layers in detail:
 <stack>/
 ├── docker-compose.yml            # required
 ├── docker-compose.<variant>.yml  # optional, e.g. docker-compose.crowdsec.yml
-├── docker-compose.<component>.yml # optional, runs on OTHER hosts, e.g. docker-compose.hawser.yml
+├── docker-compose.<component>.yml # optional, runs on other/every host, e.g. docker-compose.hawser.yml
 ├── .env.example                  # required as soon as the stack uses variables
 ├── .env                          # local only, NEVER commit (.gitignore)
 └── README.md                     # required, see "Stack README" below
@@ -135,11 +135,11 @@ New features get a short, lowercase name and are added to this table.
 
 ### Components for other hosts
 
-Some stacks have a part that runs on **other** hosts: an agent, collector or worker that belongs to the stack (e.g. Hawser for Dockhand, the Beszel agent for Beszel). It lives **in the parent stack's folder**, not in a folder of its own:
+Some stacks have a part that runs on **other** hosts, or on every host including its own: an agent, collector or worker that belongs to the stack (e.g. Hawser for Dockhand, the Beszel agent for Beszel, Telegraf for InfluxDB). It lives **in the parent stack's folder**, not in a folder of its own:
 
 | Rule | Example |
 |---|---|
-| File name `docker-compose.<component>.yml` | `dockhand/docker-compose.hawser.yml`, `beszel/docker-compose.remote-agent.yml` |
+| File name `docker-compose.<component>.yml` | `dockhand/docker-compose.hawser.yml`, `beszel/docker-compose.remote-agent.yml`, `influxdb/docker-compose.telegraf.yml` |
 | Service named after the component, not `app` | `hawser`, `agent` → container `dockhand-hawser-1` on the other host |
 | Volumes named after that service | `agent-data` |
 | Variables in the parent's `.env.example`, block `REQUIRED FOR docker-compose.<component>.yml` | `HAWSER_TOKEN` |

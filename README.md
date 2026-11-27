@@ -19,8 +19,7 @@ The repository is public to back up and version the configuration, and as inspir
 | [uptime-kuma](uptime-kuma/) | Monitoring | Uptime monitoring, monitors created from labels (AutoKuma) | – |
 | [beszel](beszel/) | Monitoring | Server and container monitoring | `agent`, `remote-agent` (other hosts) |
 | [homepage](homepage/) | Monitoring | Dashboard, filled from labels | – |
-| [influxdb](influxdb/) | Monitoring | Time series database for metrics | – |
-| [telegraf](telegraf/) | Monitoring | Collects host and container metrics into InfluxDB | – |
+| [influxdb](influxdb/) | Monitoring | Time series database for metrics. Telegraf collector for every host included | `telegraf` (every host) |
 | [grafana](grafana/) | Monitoring | Dashboards for metrics (InfluxDB) | – |
 | [heimdall](heimdall/) | Monitoring | Start page with tiles for all web apps | – |
 | [nextcloud](nextcloud/) | Apps | Files, office (Collabora), whiteboard, virus scan, SFTP | – |

@@ -1,6 +1,6 @@
 # Grafana
 
-Dashboards for metrics: together with [Telegraf](../telegraf/) and [InfluxDB](../influxdb/), it shows how hosts and containers are doing over time.
+Dashboards for metrics: together with [Telegraf](../influxdb/#telegraf-every-host) and [InfluxDB](../influxdb/), it shows how hosts and containers are doing over time.
 
 **Upstream:** [grafana/grafana](https://github.com/grafana/grafana)
 

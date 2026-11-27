@@ -1,11 +1,12 @@
-# Telegraf – collects host and container metrics and writes them to InfluxDB
+# InfluxDB – Telegraf collector for ANY host: host and container metrics into InfluxDB
 # Upstream: https://github.com/influxdata/telegraf
-# Requires: network socket-proxy (stack npmplus), an InfluxDB (stack influxdb)
+# Requires: nothing (runs on any host, writes to InfluxDB via its public URL). Deploy it on every host to monitor.
 # Updates: auto
 
 x-required:
   - ${INFLUXDB_URL:?e.g. https://influx.example.com}
   - ${INFLUXDB_TOKEN:?write token for the bucket}
+  - ${DOCKER_GID:?ls -ln /var/run/docker.sock shows the group ID}
 
 x-base: &base
   restart: unless-stopped
@@ -21,10 +22,13 @@ x-hardened: &hardened
     - ALL
 
 services:
-  app:
+  telegraf:
     # Entrypoint sets capabilities on the binary and drops to user telegraf, so no *hardened
     <<: *base
     image: telegraf:alpine
+    depends_on:
+      socket-proxy:
+        condition: service_healthy
     environment:
       # Read the host's system instead of the container's
       HOST_ETC: /hostfs/etc
@@ -34,7 +38,7 @@ services:
       HOST_RUN: /hostfs/run
       HOST_MOUNT_PREFIX: /hostfs
     configs:
-      - source: app-config
+      - source: telegraf-config
         target: /etc/telegraf/telegraf.conf
     secrets:
       - influxdb_token
@@ -51,8 +55,42 @@ services:
     pids_limit: 100
     mem_limit: 256m
 
+  # Read-only Docker API with only the calls the docker input needs
+  socket-proxy:
+    <<: *hardened
+    image: wollomatic/socket-proxy:1
+    user: "65534"
+    group_add:
+      - "${DOCKER_GID}"
+    command:
+      - "-loglevel=info"
+      - "-listenip=0.0.0.0"
+      # Reachable only via 127.0.0.1 on the host (see ports), so any source inside is fine
+      - "-allowfrom=0.0.0.0/0"
+      - '-allowGET=/(v1\.\d+/)?(_ping|version|info|containers/json|containers/[a-zA-Z0-9][a-zA-Z0-9_.-]*/(json|stats))'
+      - '-allowHEAD=/(v1\.\d+/)?_ping'
+      - "-watchdoginterval=3600"
+      - "-stoponwatchdog"
+      - "-allowhealthcheck"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      # Exception: Telegraf runs in the host network, so it reaches the proxy via localhost only
+      - "127.0.0.1:${TELEGRAF_SOCKET_PROXY_PORT:-2376}:2375"
+    networks:
+      egress:   # only for the localhost port (not possible on an internal network)
+        gw_priority: 1   # default route via egress
+    healthcheck:
+      test: ["CMD", "./healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    read_only: true
+    pids_limit: 50
+    mem_limit: 64m
+
 configs:
-  app-config:
+  telegraf-config:
     content: |
       [agent]
         interval = "${TELEGRAF_INTERVAL:-30s}"
@@ -91,9 +129,9 @@ configs:
         ignore_protocol_stats = true
       [[inputs.netstat]]
 
-      # Containers through the read-only socket proxy (host network -> its fixed IP)
+      # Containers through the read-only socket proxy of this file
       [[inputs.docker]]
-        endpoint = "tcp://${SOCKET_PROXY_NET_PREFIX:-172.31.0}.2:${SOCKET_PROXY_PORT:-2375}"
+        endpoint = "tcp://127.0.0.1:${TELEGRAF_SOCKET_PROXY_PORT:-2376}"
         gather_services = false
         perdevice_include = ["cpu"]
         total_include = ["cpu", "blkio", "network"]
@@ -101,3 +139,8 @@ configs:
 secrets:
   influxdb_token:
     environment: INFLUXDB_TOKEN
+
+networks:
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
