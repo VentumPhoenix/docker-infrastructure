@@ -15,6 +15,7 @@ The repository is public to back up and version the configuration, and as inspir
 | [semaphore](semaphore/) | Infrastructure | Web UI for Ansible, Terraform/OpenTofu and scripts | – |
 | [authentik](authentik/) | Security | Single sign-on (OIDC) and forward auth | – |
 | [vaultwarden](vaultwarden/) | Security | Bitwarden-compatible password manager | – |
+| [wazuh](wazuh/) | Security | Security monitoring (SIEM/XDR) with agents | – |
 | [uptime-kuma](uptime-kuma/) | Monitoring | Uptime monitoring, monitors created from labels (AutoKuma) | – |
 | [beszel](beszel/) | Monitoring | Server and container monitoring | `agent`, `remote-agent` (other hosts) |
 | [homepage](homepage/) | Monitoring | Dashboard, filled from labels | – |

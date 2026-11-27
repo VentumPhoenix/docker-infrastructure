@@ -101,6 +101,7 @@ If a stack can't be deployed through Dockhand, or only with restrictions, its `R
 |---|---|
 | `npmplus` | must exist **before** Dockhand (it creates the networks Dockhand joins). First deploy by hand, updates via Dockhand afterwards. |
 | `dockhand` | can't deploy or update itself reliably. Always deployed and updated by hand. |
+| `wazuh` | needs its certificates and config files from the upstream repository. One-time setup by hand, then Dockhand can deploy it. |
 
 ### Variants
 
@@ -288,6 +289,8 @@ Inside a service, keys always appear in this order. Keys that aren't needed are 
     <<: *hardened               # 1. anchor (or *base)
 
     image:                       # 2. what runs
+    hostname:
+    profiles:
     user:
     group_add:
     entrypoint:
@@ -309,6 +312,7 @@ Inside a service, keys always appear in this order. Keys that aren't needed are 
     healthcheck:                 # 7. health
 
     cap_add:                     # 8. hardening & resources
+    ulimits:
     read_only:
     tmpfs:
     pids_limit:

@@ -15,7 +15,7 @@ Every variable used in any stack is listed here. **Same purpose → same name**,
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
 | `APP_DOMAIN` | ✅ | – | Public domain of the stack's main service, without `https://` | every stack |
-| `APP_VERSION` | ◐ if used | – | Image tag, when several services share one image or upgrades must go version by version | authentik, nextcloud, gitlab |
+| `APP_VERSION` | ◐ if used | – | Image tag, when several services share one image or upgrades must go version by version | authentik, nextcloud, gitlab, wazuh |
 | `TZ` | – | `Europe/Berlin` | Time zone of the containers | every stack except hastebin and netbird |
 | `PUID` | – | `1000` | User ID the app runs as (only images that support it) | homepage, paperless, heimdall, mealie |
 | `PGID` | – | `1000` | Group ID the app runs as | homepage, paperless, heimdall, mealie |
@@ -165,6 +165,13 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `CODE_SERVER_WORKSPACE` | – | `app-workspace` (volume) | Project folder; a host path (owned by UID 1000) replaces the volume | code-server |
 | `GITLAB_ROOT_PASSWORD` | ✅ | – | Password of the root user, only used on the first start | gitlab |
 | `GITLAB_SSH_PORT` | – | `2222` | Host port for git over SSH | gitlab |
+| `WAZUH_INDEXER_PASSWORD` | ✅ | – | Password of the indexer user `admin`, must match its hash in `internal_users.yml` | wazuh |
+| `WAZUH_DASHBOARD_PASSWORD` | ✅ | – | Password of the indexer user `kibanaserver`, must match its hash in `internal_users.yml` | wazuh |
+| `WAZUH_API_PASSWORD` | ✅ | – | Password of the API user `wazuh-wui`, must match `wazuh.yml`. 8–64 chars, upper/lower case, digit, symbol | wazuh |
+| `WAZUH_CONFIG_DIR` | – | `/opt/stacks/wazuh/config` | Upstream config folder (certificates and config files) on the host | wazuh |
+| `WAZUH_AGENT_PORT` | – | `1514` | Host port for agent events | wazuh |
+| `WAZUH_ENROLLMENT_PORT` | – | `1515` | Host port for agent enrollment | wazuh |
+| `WAZUH_INDEXER_HEAP` | – | `1g` | Java heap of the indexer | wazuh |
 
 ## Infrastructure (`npmplus` stack only)
 
