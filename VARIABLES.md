@@ -44,7 +44,7 @@ These must have the **same value in every stack**.
 
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
-| `DB_PASSWORD` | ✅ | – | Password of the stack's own database. Generate: `openssl rand -hex 32` | authentik, dockhand, nextcloud, paperless, mealie |
+| `DB_PASSWORD` | ✅ | – | Password of the stack's own database. Generate: `openssl rand -hex 32` | authentik, dockhand, nextcloud, paperless, mealie, tandoor |
 | `DB_ROOT_PASSWORD` | ✅ | – | Root password of the database, only for images that need one. Generate: `openssl rand -hex 32` | nextcloud |
 
 DB name and DB user are not variables. They are hard-coded in the compose file (= stack name).
@@ -53,11 +53,11 @@ DB name and DB user are not variables. They are hard-coded in the compose file (
 
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
-| `EMAIL_HOST` | ◐ if the app should send email | – | SMTP server | authentik, vaultwarden, mealie |
-| `EMAIL_PORT` | – | `587` | SMTP port. 587 = STARTTLS, which every stack uses | authentik, vaultwarden, mealie |
-| `EMAIL_USERNAME` | – | – | SMTP login | authentik, vaultwarden, mealie |
-| `EMAIL_PASSWORD` | – | – | SMTP password | authentik, vaultwarden, mealie |
-| `EMAIL_FROM` | – | – | Sender address, e.g. `Authentik <auth@example.com>` | authentik, vaultwarden, mealie |
+| `EMAIL_HOST` | ◐ if the app should send email | – | SMTP server | authentik, vaultwarden, mealie, tandoor |
+| `EMAIL_PORT` | – | `587` | SMTP port. 587 = STARTTLS, which every stack uses | authentik, vaultwarden, mealie, tandoor |
+| `EMAIL_USERNAME` | – | – | SMTP login | authentik, vaultwarden, mealie, tandoor |
+| `EMAIL_PASSWORD` | – | – | SMTP password | authentik, vaultwarden, mealie, tandoor |
+| `EMAIL_FROM` | – | – | Sender address, e.g. `Authentik <auth@example.com>` | authentik, vaultwarden, mealie, tandoor |
 
 ## Shared services
 
@@ -155,6 +155,8 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `GRAFANA_ADMIN_USER` | – | `admin` | Local admin user | grafana |
 | `GRAFANA_ADMIN_PASSWORD` | ✅ | – | Password of the local admin user, only used when the user is created | grafana |
 | `MEALIE_ALLOW_SIGNUP` | – | `false` | Allow anyone who can reach the domain to create an account | mealie |
+| `TANDOOR_SECRET_KEY` | ✅ | – | Django secret key, at least 50 characters. Generate: `openssl rand -hex 32` | tandoor |
+| `TANDOOR_ALLOW_SIGNUP` | – | `0` | Allow anyone who can reach the domain to create an account (`1` = yes) | tandoor |
 
 ## Infrastructure (`npmplus` stack only)
 

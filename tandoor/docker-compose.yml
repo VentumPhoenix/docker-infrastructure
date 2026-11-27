@@ -1,0 +1,132 @@
+# Tandoor Recipes – recipe manager with meal planning, shopping lists and nutrition data
+# Upstream: https://github.com/TandoorRecipes/recipes
+# Requires: network npm-proxy (stack npmplus)
+# Updates: manual – app + database, updates run migrations
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${DB_PASSWORD:?}
+  - ${TANDOOR_SECRET_KEY:?openssl rand -hex 32}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    # Starts as root (bundled nginx + gunicorn), so no *hardened
+    <<: *base
+    image: vabene1111/recipes:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      SECRET_KEY_FILE: /run/secrets/secret_key
+      ALLOWED_HOSTS: ${APP_DOMAIN}
+      CSRF_TRUSTED_ORIGINS: "https://${APP_DOMAIN}"
+      # Bundled nginx + NPMplus in front
+      ALLAUTH_TRUSTED_PROXY_COUNT: "2"
+      GUNICORN_MEDIA: "0"
+      ENABLE_SIGNUP: ${TANDOOR_ALLOW_SIGNUP:-0}
+      # Database
+      DB_ENGINE: django.db.backends.postgresql
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: tandoor
+      POSTGRES_USER: tandoor
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      # Email (STARTTLS). Optional secret, so a plain env var (CONVENTIONS § 8)
+      EMAIL_HOST: ${EMAIL_HOST:-}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_HOST_USER: ${EMAIL_USERNAME:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_PASSWORD:-}
+      EMAIL_USE_TLS: "1"
+      DEFAULT_FROM_EMAIL: ${EMAIL_FROM:-}
+    secrets:
+      - secret_key
+      - db_password
+    volumes:
+      - app-static:/opt/recipes/staticfiles
+      - app-media:/opt/recipes/mediafiles
+    networks:
+      npm-proxy:
+      internal:
+      egress:   # imports recipes from other websites, nutrition data, sends email
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
+    healthcheck:   # Django only answers for ALLOWED_HOSTS, so send the public domain as Host
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--header", "Host: ${APP_DOMAIN}", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    pids_limit: 300
+    mem_limit: 1g
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "80"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.tandoor.http.name: "Tandoor"
+      kuma.tandoor.http.url: "https://${APP_DOMAIN}"
+      kuma.tandoor.http.parent_name: "apps"
+      # Dashboard (Homepage)
+      homepage.group: "Apps"
+      homepage.name: "Tandoor"
+      homepage.icon: "tandoor-recipes"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Recipes"
+
+  postgres:
+    # Image switches users on startup, so no *hardened
+    <<: *base
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: tandoor
+      POSTGRES_USER: tandoor
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    pids_limit: 200
+    mem_limit: 512m
+
+secrets:
+  secret_key:
+    environment: TANDOOR_SECRET_KEY
+  db_password:
+    environment: DB_PASSWORD
+
+volumes:
+  app-static:
+  app-media:
+  postgres-data:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  internal:
+    internal: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
