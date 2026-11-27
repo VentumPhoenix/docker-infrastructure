@@ -18,6 +18,7 @@ The repository is public to back up and version the configuration, and as inspir
 | [uptime-kuma](uptime-kuma/) | Monitoring | Uptime monitoring, monitors created from labels (AutoKuma) | – |
 | [beszel](beszel/) | Monitoring | Server and container monitoring | `agent` |
 | [homepage](homepage/) | Monitoring | Dashboard, filled from labels | – |
+| [beszel-agent](beszel-agent/) | Monitoring | Beszel agent for other hosts, with its own read-only socket proxy | – |
 | [nextcloud](nextcloud/) | Apps | Files, office (Collabora), whiteboard, virus scan, SFTP | – |
 | [paperless](paperless/) | Apps | Document management with OCR and full-text search | `tika` |
 | [sillytavern](sillytavern/) | Apps | LLM chat frontend, API requests through a VPN | – |

@@ -103,8 +103,8 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `CROWDSEC_BOUNCER_KEY` | ◐ variant `crowdsec` | – | Shared key between the NPMplus bouncer and CrowdSec. Generate: `openssl rand -hex 32` | npmplus |
 | `CROWDSEC_ENROLL_KEY` | – | – | Connects the instance to the CrowdSec Console | npmplus |
 | `CROWDSEC_INSTANCE_NAME` | – | – | Name of the instance in the CrowdSec Console | npmplus |
-| `BESZEL_AGENT_KEY` | ◐ variant `agent` | – | Public key of the hub, shown in the Beszel UI when adding a system | beszel |
-| `BESZEL_AGENT_TOKEN` | ◐ variant `agent` | – | Registration token from the Beszel UI | beszel |
+| `BESZEL_AGENT_KEY` | ◐ variant `agent` | – | Public key of the hub, shown in the Beszel UI when adding a system | beszel, beszel-agent |
+| `BESZEL_AGENT_TOKEN` | ◐ variant `agent` | – | Registration token from the Beszel UI | beszel, beszel-agent |
 | `DOCKHAND_STACKS_DIR` | – | `/opt/stacks` | Folder on the host with the stack folders Dockhand deploys | dockhand |
 | `RDPGW_SESSION_KEY` | ✅ | – | Session key, exactly 32 characters. Generate: `openssl rand -hex 16` | rdpgw |
 | `RDPGW_SESSION_ENCRYPTION_KEY` | ✅ | – | Session encryption key, 32 characters, different from the others | rdpgw |
@@ -128,12 +128,15 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `HAWSER_TOKEN` | ✅ | – | Token of this agent, shown in Dockhand | hawser |
 | `HAWSER_AGENT_NAME` | – | (empty) | Name of the host in Dockhand | hawser |
 | `HAWSER_STACKS_DIR` | – | `/opt/stacks` | Folder on the host with the stack folders Dockhand deploys there | hawser |
+| `BESZEL_HUB_URL` | ✅ | – | URL of the Beszel hub the agent reports to | beszel-agent |
+| `BESZEL_AGENT_PORT` | – | `45876` | Port on the host the hub connects to | beszel-agent |
+| `BESZEL_SOCKET_PROXY_PORT` | – | `2375` | Localhost port of the agent's own socket proxy | beszel-agent |
 
 ## Infrastructure (`npmplus` stack only)
 
 | Variable | Req. | Default | Description |
 |---|---|---|---|
-| `DOCKER_GID` | ✅ | – | Group ID of the Docker socket on the host: `ls -ln /var/run/docker.sock` |
+| `DOCKER_GID` | ✅ | – | Group ID of the Docker socket on the host: `ls -ln /var/run/docker.sock`. Also used by `beszel-agent`, which brings its own socket proxy |
 | `NPM_PROXY_NET_PREFIX` | – | `172.30.0` | First three octets of the `npm-proxy` subnet. Change only if it collides |
 | `NPM_PROXY_BRIDGE` | – | `br-npm` | Name of the Linux bridge of `npm-proxy` (used by `firewall`, max. 15 characters) |
 | `SOCKET_PROXY_NET_PREFIX` | – | `172.31.0` | First three octets of the `socket-proxy` subnet. Also used by the Beszel `agent` variant, which runs in the host network and has to reach the socket proxy by IP |
