@@ -1,0 +1,356 @@
+# Website – template for a website (e.g. Astro/SSR) with Directus as headless CMS (variant: pretix for bookings and shop)
+# Upstream: https://github.com/directus/directus, https://github.com/pretix/pretix
+# Requires: network npm-proxy (stack npmplus), an image of your website (WEB_IMAGE)
+# Updates: manual – CMS + database, updates run migrations
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${WEB_IMAGE:?image of your website, e.g. ghcr.io/you/website:latest}
+  - ${DIRECTUS_DOMAIN:?}
+  - ${DIRECTUS_SECRET:?openssl rand -hex 32}
+  - ${DIRECTUS_DB_PASSWORD:?}
+  - ${DIRECTUS_ADMIN_EMAIL:?}
+  - ${DIRECTUS_ADMIN_PASSWORD:?}
+  # Pretix:
+  - ${PRETIX_DOMAIN:?}
+  - ${PRETIX_DB_PASSWORD:?}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+# Pretix: settings shared by pretix and pretix-cron (pretix reads PRETIX_<SECTION>_<KEY>)
+x-pretix-environment: &pretix-environment
+  TZ: ${TZ:-Europe/Berlin}
+  PRETIX_PRETIX_INSTANCE_NAME: ${PRETIX_INSTANCE_NAME:-pretix}
+  PRETIX_PRETIX_URL: "https://${PRETIX_DOMAIN}"
+  PRETIX_PRETIX_DATADIR: /data
+  PRETIX_PRETIX_TRUST_X_FORWARDED_FOR: "on"
+  PRETIX_PRETIX_TRUST_X_FORWARDED_PROTO: "on"
+  # Database (password from a file: pretix reads FILE__<variable>)
+  PRETIX_DATABASE_BACKEND: postgresql
+  PRETIX_DATABASE_NAME: pretix
+  PRETIX_DATABASE_USER: pretix
+  PRETIX_DATABASE_HOST: pretix-postgres
+  FILE__PRETIX_DATABASE_PASSWORD: /run/secrets/pretix_db_password
+  # Redis: cache, sessions, task queue
+  PRETIX_REDIS_LOCATION: redis://pretix-redis:6379/0
+  PRETIX_REDIS_SESSIONS: "true"
+  PRETIX_CELERY_BACKEND: redis://pretix-redis:6379/1
+  PRETIX_CELERY_BROKER: redis://pretix-redis:6379/2
+  # Email (STARTTLS). Optional secret, so a plain env var (CONVENTIONS § 8)
+  PRETIX_MAIL_FROM: ${EMAIL_FROM:-}
+  PRETIX_MAIL_HOST: ${EMAIL_HOST:-}
+  PRETIX_MAIL_PORT: ${EMAIL_PORT:-587}
+  PRETIX_MAIL_USER: ${EMAIL_USERNAME:-}
+  PRETIX_MAIL_PASSWORD: ${EMAIL_PASSWORD:-}
+  PRETIX_MAIL_TLS: "on"
+
+services:
+  # The website itself (server-side rendered, e.g. Astro with the Node adapter)
+  app:
+    <<: *hardened
+    image: ${WEB_IMAGE}
+    depends_on:
+      directus:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "4321"
+      # CMS internally, never via the public domain
+      DIRECTUS_URL: http://directus:8055
+      # Pretix: public URL, the booking widget runs in the visitor's browser
+      PRETIX_URL: "https://${PRETIX_DOMAIN}"
+      # Add the website's own variables here
+    networks:
+      - npm-proxy
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4321/ || curl -fs -o /dev/null http://127.0.0.1:4321/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    pids_limit: 200
+    mem_limit: 512m
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "4321"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.website.http.name: "Website"
+      kuma.website.http.url: "https://${APP_DOMAIN}"
+      kuma.website.http.parent_name: "apps"
+      # Dashboard (Homepage)
+      homepage.group: "Apps"
+      homepage.name: "Website"
+      homepage.icon: "astro"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Website"
+
+  # Headless CMS: editors work at DIRECTUS_DOMAIN, the website reads it internally
+  directus:
+    <<: *hardened
+    image: directus/directus:11
+    depends_on:
+      directus-postgres:
+        condition: service_healthy
+      directus-redis:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      PUBLIC_URL: "https://${DIRECTUS_DOMAIN}"
+      SECRET_FILE: /run/secrets/directus_secret
+      # First admin, created on the first start
+      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL}
+      ADMIN_PASSWORD_FILE: /run/secrets/directus_admin_password
+      # Database
+      DB_CLIENT: pg
+      DB_HOST: directus-postgres
+      DB_PORT: "5432"
+      DB_DATABASE: directus
+      DB_USER: directus
+      DB_PASSWORD_FILE: /run/secrets/directus_db_password
+      # Redis: cache + rate limiter
+      REDIS: redis://directus-redis:6379/0
+      CACHE_ENABLED: "true"
+      CACHE_STORE: redis
+      CACHE_AUTO_PURGE: "true"
+      RATE_LIMITER_ENABLED: "true"
+      RATE_LIMITER_STORE: redis
+      # Behind HTTPS: secure cookies
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_COOKIE_SAME_SITE: lax
+      REFRESH_TOKEN_COOKIE_SECURE: "true"
+      REFRESH_TOKEN_COOKIE_SAME_SITE: lax
+      # CORS only for the website
+      CORS_ENABLED: "true"
+      CORS_ORIGIN: "https://${APP_DOMAIN}"
+    secrets:
+      - directus_secret
+      - directus_admin_password
+      - directus_db_password
+    volumes:
+      - directus-uploads:/directus/uploads
+    networks:
+      - npm-proxy
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8055/server/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    pids_limit: 300
+    mem_limit: 512m
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${DIRECTUS_DOMAIN}
+      npm.proxy.port: "8055"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.website-cms.http.name: "Website CMS"
+      kuma.website-cms.http.url: "https://${DIRECTUS_DOMAIN}/server/health"
+      kuma.website-cms.http.parent_name: "apps"
+
+  # Pretix: bookings and shop, web + task worker in one container
+  pretix:
+    # Hardening untested with the pretix image
+    <<: *base
+    image: pretix/standalone:stable
+    command: ["all"]
+    depends_on:
+      pretix-postgres:
+        condition: service_healthy
+      pretix-redis:
+        condition: service_healthy
+    environment:
+      <<: *pretix-environment
+    secrets:
+      - pretix_db_password
+    volumes:
+      - pretix-data:/data
+    networks:
+      npm-proxy:
+      internal:
+      egress:   # email, currency rates (ECB), payment providers
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
+    healthcheck:   # pretix's own health URL, with the public domain as Host
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1/healthcheck/', headers={'Host': '${PRETIX_DOMAIN}'}), timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 2m
+    pids_limit: 500
+    mem_limit: 1g
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${PRETIX_DOMAIN}
+      npm.proxy.port: "80"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.website-pretix.http.name: "Website bookings"
+      kuma.website-pretix.http.url: "https://${PRETIX_DOMAIN}/healthcheck/"
+      kuma.website-pretix.http.parent_name: "apps"
+
+  # Pretix: periodic tasks (waiting lists, expiring reservations, …) every 2 minutes.
+  # Same image instead of Ofelia, so no Docker socket is needed.
+  pretix-cron:
+    <<: *base
+    image: pretix/standalone:stable
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          pretix cron && date +%s > /tmp/heartbeat
+          sleep 120
+        done
+    depends_on:
+      pretix:
+        condition: service_healthy
+    environment:
+      <<: *pretix-environment
+      AUTOMIGRATE: skip   # migrations are done by the pretix container
+    secrets:
+      - pretix_db_password
+    volumes:
+      - pretix-data:/data
+    networks:
+      internal:
+      egress:   # periodic tasks fetch currency rates and send email
+        gw_priority: 1   # default route via egress
+    healthcheck:   # last successful run less than 10 minutes ago
+      test: ["CMD-SHELL", "test -f /tmp/heartbeat && [ $$(( $$(date +%s) - $$(cat /tmp/heartbeat) )) -lt 600 ]"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 5m
+    pids_limit: 200
+    mem_limit: 512m
+
+  directus-postgres:
+    # Image switches users on startup, so no *hardened
+    <<: *base
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: directus
+      POSTGRES_USER: directus
+      POSTGRES_PASSWORD_FILE: /run/secrets/directus_db_password
+    secrets:
+      - directus_db_password
+    volumes:
+      - directus-postgres-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    pids_limit: 200
+    mem_limit: 512m
+
+  # Pure cache: no persistence, memory limit with eviction
+  directus-redis:
+    <<: *hardened
+    image: redis:8-alpine
+    command: ["redis-server", "--save", "", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    cap_add:   # entrypoint fixes ownership of /data and drops to user redis
+      - CHOWN
+      - SETUID
+      - SETGID
+    pids_limit: 100
+    mem_limit: 320m
+
+  pretix-postgres:
+    # Image switches users on startup, so no *hardened
+    <<: *base
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: pretix
+      POSTGRES_USER: pretix
+      POSTGRES_PASSWORD_FILE: /run/secrets/pretix_db_password
+    secrets:
+      - pretix_db_password
+    volumes:
+      - pretix-postgres-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    pids_limit: 200
+    mem_limit: 512m
+
+  # Sessions + task queue: persistent, no eviction
+  pretix-redis:
+    <<: *hardened
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - pretix-redis-data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    cap_add:   # entrypoint fixes ownership of /data and drops to user redis
+      - CHOWN
+      - SETUID
+      - SETGID
+    pids_limit: 100
+    mem_limit: 256m
+
+secrets:
+  directus_secret:
+    environment: DIRECTUS_SECRET
+  directus_admin_password:
+    environment: DIRECTUS_ADMIN_PASSWORD
+  directus_db_password:
+    environment: DIRECTUS_DB_PASSWORD
+  pretix_db_password:   # Pretix
+    environment: PRETIX_DB_PASSWORD
+
+volumes:
+  directus-uploads:
+  directus-postgres-data:
+  pretix-data:            # Pretix
+  pretix-postgres-data:   # Pretix
+  pretix-redis-data:      # Pretix
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  internal:
+    internal: true
+  egress:   # Pretix
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

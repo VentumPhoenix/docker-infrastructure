@@ -125,6 +125,7 @@ Standard features:
 | Authentik | `authentik` | `npmplus` stack: `AUTH_REQUEST_AUTHENTIK_UPSTREAM`, so NPMplus can do forward auth |
 | Agent | `agent` | `beszel` stack: monitoring agent for the local host |
 | Tika | `tika` | `paperless` stack: Office documents and emails via Tika + Gotenberg |
+| pretix | `pretix` | `website` stack: bookings, tickets and shop |
 
 New features get a short, lowercase name and are added to this table.
 
@@ -252,6 +253,7 @@ Why:
 | Main application (web UI / API) | `app` | `app` |
 | Other parts of the same application | by function | `worker`, `scheduler`, `agent` |
 | Databases, caches, queues | by technology | `postgres`, `mariadb`, `redis` |
+| Several databases of the same kind | `<owner>-<technology>` | `directus-postgres`, `pretix-redis` |
 | Infrastructure addressed **across stacks** | unique & descriptive | `socket-proxy` |
 
 **Important:** A service name is also a DNS name in every network the service is attached to. Since every stack has an `app`, the name `app` is **ambiguous** in the shared network `npm-proxy`. Therefore:
@@ -435,6 +437,7 @@ Groups inside `environment` are separated by a short comment (`# Database`, `# E
 |---|---|---|
 | `APP_<PURPOSE>` | the stack's main service, in every stack | `APP_DOMAIN`, `APP_VERSION` |
 | `DB_<PURPOSE>` | the stack's own database | `DB_PASSWORD` |
+| `<APP>_DB_<PURPOSE>` | only if a stack has several databases | `DIRECTUS_DB_PASSWORD`, `PRETIX_DB_PASSWORD` |
 | `EMAIL_<PURPOSE>` | outgoing email (SMTP) | `EMAIL_HOST`, `EMAIL_FROM` |
 | `<NETWORK>_<PURPOSE>` | shared networks, named after the network | `NPM_PROXY_NETWORK`, `SOCKET_PROXY_HOST` |
 | `<APP>_SERVICE_USER` / `<APP>_SERVICE_PASSWORD` | account an automation tool uses to log into an app | `NPM_SERVICE_USER`, `KUMA_SERVICE_USER` |

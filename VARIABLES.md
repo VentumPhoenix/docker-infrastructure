@@ -28,6 +28,8 @@ Public domains of further services in a stack. Pattern: `<SERVICE>_DOMAIN`, with
 |---|---|---|---|---|
 | `COLLABORA_DOMAIN` | ✅ | – | Domain of the Collabora online office | nextcloud |
 | `WHITEBOARD_DOMAIN` | ✅ | – | Domain of the Nextcloud Whiteboard server | nextcloud |
+| `DIRECTUS_DOMAIN` | ✅ | – | Domain of the Directus CMS | website |
+| `PRETIX_DOMAIN` | ◐ variant `pretix` | – | Domain of the booking system and shop | website |
 
 ## Shared networks
 
@@ -46,6 +48,8 @@ These must have the **same value in every stack**.
 |---|---|---|---|---|
 | `DB_PASSWORD` | ✅ | – | Password of the stack's own database. Generate: `openssl rand -hex 32` | authentik, dockhand, nextcloud, paperless, mealie, tandoor, semaphore |
 | `DB_ROOT_PASSWORD` | ✅ | – | Root password of the database, only for images that need one. Generate: `openssl rand -hex 32` | nextcloud |
+| `DIRECTUS_DB_PASSWORD` | ✅ | – | Database password of Directus (stacks with more than one database use `<APP>_DB_PASSWORD`) | website |
+| `PRETIX_DB_PASSWORD` | ◐ variant `pretix` | – | Database password of pretix | website |
 
 DB name and DB user are not variables. They are hard-coded in the compose file (= stack name).
 
@@ -53,11 +57,11 @@ DB name and DB user are not variables. They are hard-coded in the compose file (
 
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
-| `EMAIL_HOST` | ◐ if the app should send email | – | SMTP server | authentik, vaultwarden, mealie, tandoor, gitlab |
-| `EMAIL_PORT` | – | `587` | SMTP port. 587 = STARTTLS, which every stack uses | authentik, vaultwarden, mealie, tandoor, gitlab |
-| `EMAIL_USERNAME` | – | – | SMTP login | authentik, vaultwarden, mealie, tandoor, gitlab |
-| `EMAIL_PASSWORD` | – | – | SMTP password | authentik, vaultwarden, mealie, tandoor, gitlab |
-| `EMAIL_FROM` | – | – | Sender address, e.g. `Authentik <auth@example.com>` | authentik, vaultwarden, mealie, tandoor, gitlab |
+| `EMAIL_HOST` | ◐ if the app should send email | – | SMTP server | authentik, vaultwarden, mealie, tandoor, gitlab, website |
+| `EMAIL_PORT` | – | `587` | SMTP port. 587 = STARTTLS, which every stack uses | authentik, vaultwarden, mealie, tandoor, gitlab, website |
+| `EMAIL_USERNAME` | – | – | SMTP login | authentik, vaultwarden, mealie, tandoor, gitlab, website |
+| `EMAIL_PASSWORD` | – | – | SMTP password | authentik, vaultwarden, mealie, tandoor, gitlab, website |
+| `EMAIL_FROM` | – | – | Sender address, e.g. `Authentik <auth@example.com>` | authentik, vaultwarden, mealie, tandoor, gitlab, website |
 
 ## Shared services
 
@@ -172,6 +176,11 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `WAZUH_AGENT_PORT` | – | `1514` | Host port for agent events | wazuh |
 | `WAZUH_ENROLLMENT_PORT` | – | `1515` | Host port for agent enrollment | wazuh |
 | `WAZUH_INDEXER_HEAP` | – | `1g` | Java heap of the indexer | wazuh |
+| `WEB_IMAGE` | ✅ | – | Image of the website, e.g. `ghcr.io/you/website:latest` | website |
+| `DIRECTUS_SECRET` | ✅ | – | Directus secret key. Generate: `openssl rand -hex 32` | website |
+| `DIRECTUS_ADMIN_EMAIL` | ✅ | – | First Directus admin, only used on the first start | website |
+| `DIRECTUS_ADMIN_PASSWORD` | ✅ | – | Password of the first Directus admin, only used on the first start | website |
+| `PRETIX_INSTANCE_NAME` | – | `pretix` | Name of the pretix instance in emails and the UI | website |
 
 ## Infrastructure (`npmplus` stack only)
 
