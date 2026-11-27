@@ -22,15 +22,18 @@ jobs:
             fi
             dir=$(dirname "$file")
 
-            # .env.example with dummy values for empty required variables
+            # .env.example with dummy values for empty required variables.
+            # Variables of the "REQUIRED FOR VARIANT" blocks are commented out, so they are
+            # uncommented here (everything up to the OPTIONAL block).
             env=$(mktemp)
             if [ -f "$dir/.env.example" ]; then
-              sed -E 's/^([A-Z0-9_]+)=$/\1=ci-dummy/' "$dir/.env.example" > "$env"
+              awk '
+                /REQUIRED FOR VARIANT/ { variant = 1 }
+                /OPTIONAL/             { variant = 0 }
+                variant && /^#[A-Z0-9_]+=/ { sub(/^#/, "") }
+                { print }
+              ' "$dir/.env.example" | sed -E 's/^([A-Z0-9_]+)=$/\1=ci-dummy/' > "$env"
             fi
-            # Variables of variants are commented out in .env.example, so set them here
-            for var in AUTHENTIK_URL CROWDSEC_BOUNCER_KEY BESZEL_AGENT_KEY BESZEL_AGENT_TOKEN; do
-              grep -q "^$var=" "$env" || echo "$var=ci-dummy" >> "$env"
-            done
 
             if out=$(docker compose -f "$file" --env-file "$env" config -q 2>&1); then
               if [ -n "$out" ]; then
