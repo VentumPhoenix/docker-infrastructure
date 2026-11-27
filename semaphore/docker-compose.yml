@@ -1,0 +1,122 @@
+# Semaphore UI – web UI for Ansible, Terraform/OpenTofu and scripts: run playbooks, schedules, history
+# Upstream: https://github.com/semaphoreui/semaphore
+# Requires: network npm-proxy (stack npmplus)
+# Updates: manual – app + database, updates run migrations
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${DB_PASSWORD:?}
+  - ${SEMAPHORE_ADMIN_PASSWORD:?}
+  - ${SEMAPHORE_ACCESS_KEY_ENCRYPTION:?head -c32 /dev/urandom | base64}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    <<: *hardened
+    image: semaphoreui/semaphore:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      SEMAPHORE_WEB_ROOT: "https://${APP_DOMAIN}"
+      # Plain env vars: Semaphore has no *_FILE support (CONVENTIONS § 8 fallback)
+      # Database
+      SEMAPHORE_DB_DIALECT: postgres
+      SEMAPHORE_DB_HOST: postgres
+      SEMAPHORE_DB_PORT: "5432"
+      SEMAPHORE_DB: semaphore
+      SEMAPHORE_DB_USER: semaphore
+      SEMAPHORE_DB_PASS: ${DB_PASSWORD}
+      # First admin, created on the first start
+      SEMAPHORE_ADMIN: ${SEMAPHORE_ADMIN_USER:-admin}
+      SEMAPHORE_ADMIN_NAME: ${SEMAPHORE_ADMIN_USER:-admin}
+      SEMAPHORE_ADMIN_EMAIL: ${SEMAPHORE_ADMIN_EMAIL:-admin@localhost}
+      SEMAPHORE_ADMIN_PASSWORD: ${SEMAPHORE_ADMIN_PASSWORD}
+      # Encrypts the stored SSH keys and passwords. Never change it after setup.
+      SEMAPHORE_ACCESS_KEY_ENCRYPTION: ${SEMAPHORE_ACCESS_KEY_ENCRYPTION}
+    volumes:
+      - app-data:/var/lib/semaphore
+      - app-config:/etc/semaphore
+    networks:
+      npm-proxy:
+      internal:
+      egress:   # runs playbooks against your hosts, clones git repositories, installs Ansible collections
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || curl -fs -o /dev/null http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    pids_limit: 500
+    mem_limit: 1g
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "3000"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.semaphore.http.name: "Semaphore"
+      kuma.semaphore.http.url: "https://${APP_DOMAIN}"
+      kuma.semaphore.http.parent_name: "infrastructure"
+      # Dashboard (Homepage)
+      homepage.group: "Infrastructure"
+      homepage.name: "Semaphore"
+      homepage.icon: "semaphore"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Ansible UI"
+
+  postgres:
+    # Image switches users on startup, so no *hardened
+    <<: *base
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: semaphore
+      POSTGRES_USER: semaphore
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    pids_limit: 200
+    mem_limit: 512m
+
+secrets:
+  db_password:
+    environment: DB_PASSWORD
+
+volumes:
+  app-data:
+  app-config:
+  postgres-data:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  internal:
+    internal: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

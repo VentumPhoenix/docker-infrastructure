@@ -44,7 +44,7 @@ These must have the **same value in every stack**.
 
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
-| `DB_PASSWORD` | ✅ | – | Password of the stack's own database. Generate: `openssl rand -hex 32` | authentik, dockhand, nextcloud, paperless, mealie, tandoor |
+| `DB_PASSWORD` | ✅ | – | Password of the stack's own database. Generate: `openssl rand -hex 32` | authentik, dockhand, nextcloud, paperless, mealie, tandoor, semaphore |
 | `DB_ROOT_PASSWORD` | ✅ | – | Root password of the database, only for images that need one. Generate: `openssl rand -hex 32` | nextcloud |
 
 DB name and DB user are not variables. They are hard-coded in the compose file (= stack name).
@@ -157,6 +157,10 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `MEALIE_ALLOW_SIGNUP` | – | `false` | Allow anyone who can reach the domain to create an account | mealie |
 | `TANDOOR_SECRET_KEY` | ✅ | – | Django secret key, at least 50 characters. Generate: `openssl rand -hex 32` | tandoor |
 | `TANDOOR_ALLOW_SIGNUP` | – | `0` | Allow anyone who can reach the domain to create an account (`1` = yes) | tandoor |
+| `SEMAPHORE_ADMIN_USER` | – | `admin` | First admin, created on the first start | semaphore |
+| `SEMAPHORE_ADMIN_EMAIL` | – | `admin@localhost` | Email of the first admin | semaphore |
+| `SEMAPHORE_ADMIN_PASSWORD` | ✅ | – | Password of the first admin, only used on the first start | semaphore |
+| `SEMAPHORE_ACCESS_KEY_ENCRYPTION` | ✅ | – | Encrypts stored SSH keys and passwords. Never change it. Generate: `head -c32 /dev/urandom \| base64` | semaphore |
 
 ## Infrastructure (`npmplus` stack only)
 
