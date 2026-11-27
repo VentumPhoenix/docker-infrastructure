@@ -1,0 +1,86 @@
+# InfluxDB – time series database for metrics (written by Telegraf, read by Grafana)
+# Upstream: https://github.com/influxdata/influxdb
+# Requires: network npm-proxy (stack npmplus)
+# Updates: auto
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${INFLUXDB_ADMIN_PASSWORD:?}
+  - ${INFLUXDB_ADMIN_TOKEN:?openssl rand -hex 32}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    # Starts as root and drops to user influxdb (gosu), so no *hardened
+    <<: *base
+    image: influxdb:2
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      # First start only: create admin user, organization, bucket and admin token
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_ADMIN_USER:-admin}
+      DOCKER_INFLUXDB_INIT_PASSWORD_FILE: /run/secrets/admin_password
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN_FILE: /run/secrets/admin_token
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-homelab}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-telegraf}
+      DOCKER_INFLUXDB_INIT_RETENTION: ${INFLUXDB_RETENTION:-30d}
+      # No telemetry to InfluxData
+      INFLUXD_REPORTING_DISABLED: "true"
+    secrets:
+      - admin_password
+      - admin_token
+    volumes:
+      - app-data:/var/lib/influxdb2
+      - app-config:/etc/influxdb2
+    networks:
+      - npm-proxy   # UI and API; Telegraf and Grafana write/read via the public URL
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://127.0.0.1:8086/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    pids_limit: 300
+    mem_limit: 1g
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "8086"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.influxdb.http.name: "InfluxDB"
+      kuma.influxdb.http.url: "https://${APP_DOMAIN}/health"
+      kuma.influxdb.http.parent_name: "monitoring"
+      # Dashboard (Homepage)
+      homepage.group: "Monitoring"
+      homepage.name: "InfluxDB"
+      homepage.icon: "influxdb"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Metrics database"
+
+secrets:
+  admin_password:
+    environment: INFLUXDB_ADMIN_PASSWORD
+  admin_token:
+    environment: INFLUXDB_ADMIN_TOKEN
+
+volumes:
+  app-data:
+  app-config:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true

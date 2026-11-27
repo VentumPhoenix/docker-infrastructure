@@ -75,6 +75,19 @@ OIDC client of an app at Authentik. Pattern: `<APP>_OIDC_CLIENT_ID` / `<APP>_OID
 | `RDPGW_OIDC_CLIENT_SECRET` | ✅ | – | Client secret of the Authentik provider | rdpgw |
 | `RDPGW_OIDC_SLUG` | – | `rdpgw` | Slug of the application in Authentik | rdpgw |
 
+## Metrics (InfluxDB)
+
+The same names are used by every stack that talks to InfluxDB (influxdb, telegraf, grafana).
+
+| Variable | Req. | Default | Description | Used in |
+|---|---|---|---|---|
+| `INFLUXDB_ADMIN_USER` | – | `admin` | Admin user, created on the first start | influxdb |
+| `INFLUXDB_ADMIN_PASSWORD` | ✅ | – | Password of the admin user, only used on the first start | influxdb |
+| `INFLUXDB_ADMIN_TOKEN` | ✅ | – | Admin API token, only used on the first start. Generate: `openssl rand -hex 32` | influxdb |
+| `INFLUXDB_ORG` | – | `homelab` | Organization | influxdb |
+| `INFLUXDB_BUCKET` | – | `telegraf` | Bucket for the metrics | influxdb |
+| `INFLUXDB_RETENTION` | – | `30d` | How long metrics are kept, only used on the first start | influxdb |
+
 ## Service accounts
 
 Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USER` / `<APP>_SERVICE_PASSWORD`.
