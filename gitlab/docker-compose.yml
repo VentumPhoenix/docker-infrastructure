@@ -1,0 +1,128 @@
+# GitLab CE – git hosting with merge requests, issues, CI/CD and container registry
+# Upstream: https://gitlab.com/gitlab-org/omnibus-gitlab
+# Requires: network npm-proxy (stack npmplus)
+# Updates: manual – upgrades must follow GitLab's upgrade path, one required stop at a time
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${APP_VERSION:?image tag, e.g. 18.0.0-ce.0}
+  - ${GITLAB_ROOT_PASSWORD:?}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    # Omnibus image: runs many services as root and their own users, so no *hardened
+    <<: *base
+    image: gitlab/gitlab-ce:${APP_VERSION}
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      # Whole configuration from the file below, so no password ends up in an environment variable
+      GITLAB_OMNIBUS_CONFIG: "from_file('/omnibus_config.rb')"
+    configs:
+      - source: app-config
+        target: /omnibus_config.rb
+    secrets:
+      - root_password
+    volumes:
+      - app-config:/etc/gitlab
+      - app-logs:/var/log/gitlab
+      - app-data:/var/opt/gitlab
+    ports:
+      # Exception: git over SSH is not HTTP and can't go through the reverse proxy
+      - "${GITLAB_SSH_PORT:-2222}:22"
+    networks:
+      npm-proxy:
+      egress:   # email, repository mirrors, webhooks, dependency proxy; also needed for the SSH port
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
+    healthcheck:   # same as the image's own healthcheck, first start takes several minutes
+      test: ["CMD", "/opt/gitlab/bin/gitlab-healthcheck", "--fail", "--max-time", "10"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 10m
+    pids_limit: 4096
+    mem_limit: 8g
+    shm_size: 256m
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "80"
+      npm.proxy.scheme: "http"
+      # Large pushes and uploads
+      npm.proxy.advanced.config: |
+        client_max_body_size 0;
+        proxy_read_timeout 300s;
+      # Monitoring (AutoKuma)
+      kuma.gitlab.http.name: "GitLab"
+      kuma.gitlab.http.url: "https://${APP_DOMAIN}/users/sign_in"
+      kuma.gitlab.http.parent_name: "apps"
+      # Dashboard (Homepage)
+      homepage.group: "Apps"
+      homepage.name: "GitLab"
+      homepage.icon: "gitlab"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Git & CI/CD"
+
+configs:
+  # Ruby (gitlab.rb syntax). Lands as a file in the container, not in the environment.
+  app-config:
+    content: |
+      external_url 'https://${APP_DOMAIN}'
+
+      # TLS ends at NPMplus, GitLab's own nginx listens on plain HTTP
+      nginx['listen_port'] = 80
+      nginx['listen_https'] = false
+      letsencrypt['enable'] = false
+      # Real client IPs from NPMplus
+      nginx['real_ip_trusted_addresses'] = ['${NPM_PROXY_NET_PREFIX:-172.30.0}.2']
+      nginx['real_ip_header'] = 'X-Forwarded-For'
+      nginx['real_ip_recursive'] = 'on'
+
+      # SSH clone URLs use the published host port
+      gitlab_rails['gitlab_shell_ssh_port'] = ${GITLAB_SSH_PORT:-2222}
+
+      # First root password, from the Compose secret
+      gitlab_rails['initial_root_password'] = File.read('/run/secrets/root_password').strip
+
+      # Email (STARTTLS), only active when EMAIL_HOST is set
+      gitlab_rails['smtp_enable'] = !'${EMAIL_HOST:-}'.empty?
+      gitlab_rails['smtp_address'] = '${EMAIL_HOST:-}'
+      gitlab_rails['smtp_port'] = ${EMAIL_PORT:-587}
+      gitlab_rails['smtp_user_name'] = '${EMAIL_USERNAME:-}'
+      gitlab_rails['smtp_password'] = '${EMAIL_PASSWORD:-}'
+      gitlab_rails['smtp_authentication'] = 'login'
+      gitlab_rails['smtp_enable_starttls_auto'] = true
+      gitlab_rails['smtp_tls'] = false
+      gitlab_rails['gitlab_email_from'] = '${EMAIL_FROM:-}'
+
+      # Less memory: no bundled Prometheus stack
+      prometheus_monitoring['enable'] = false
+
+secrets:
+  root_password:
+    environment: GITLAB_ROOT_PASSWORD
+
+volumes:
+  app-config:
+  app-logs:
+  app-data:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

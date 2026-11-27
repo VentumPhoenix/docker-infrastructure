@@ -15,7 +15,7 @@ Every variable used in any stack is listed here. **Same purpose → same name**,
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
 | `APP_DOMAIN` | ✅ | – | Public domain of the stack's main service, without `https://` | every stack |
-| `APP_VERSION` | ◐ if used | – | Image tag, only when several services share one image | authentik, nextcloud |
+| `APP_VERSION` | ◐ if used | – | Image tag, when several services share one image or upgrades must go version by version | authentik, nextcloud, gitlab |
 | `TZ` | – | `Europe/Berlin` | Time zone of the containers | every stack except hastebin and netbird |
 | `PUID` | – | `1000` | User ID the app runs as (only images that support it) | homepage, paperless, heimdall, mealie |
 | `PGID` | – | `1000` | Group ID the app runs as | homepage, paperless, heimdall, mealie |
@@ -53,11 +53,11 @@ DB name and DB user are not variables. They are hard-coded in the compose file (
 
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
-| `EMAIL_HOST` | ◐ if the app should send email | – | SMTP server | authentik, vaultwarden, mealie, tandoor |
-| `EMAIL_PORT` | – | `587` | SMTP port. 587 = STARTTLS, which every stack uses | authentik, vaultwarden, mealie, tandoor |
-| `EMAIL_USERNAME` | – | – | SMTP login | authentik, vaultwarden, mealie, tandoor |
-| `EMAIL_PASSWORD` | – | – | SMTP password | authentik, vaultwarden, mealie, tandoor |
-| `EMAIL_FROM` | – | – | Sender address, e.g. `Authentik <auth@example.com>` | authentik, vaultwarden, mealie, tandoor |
+| `EMAIL_HOST` | ◐ if the app should send email | – | SMTP server | authentik, vaultwarden, mealie, tandoor, gitlab |
+| `EMAIL_PORT` | – | `587` | SMTP port. 587 = STARTTLS, which every stack uses | authentik, vaultwarden, mealie, tandoor, gitlab |
+| `EMAIL_USERNAME` | – | – | SMTP login | authentik, vaultwarden, mealie, tandoor, gitlab |
+| `EMAIL_PASSWORD` | – | – | SMTP password | authentik, vaultwarden, mealie, tandoor, gitlab |
+| `EMAIL_FROM` | – | – | Sender address, e.g. `Authentik <auth@example.com>` | authentik, vaultwarden, mealie, tandoor, gitlab |
 
 ## Shared services
 
@@ -163,13 +163,15 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `SEMAPHORE_ACCESS_KEY_ENCRYPTION` | ✅ | – | Encrypts stored SSH keys and passwords. Never change it. Generate: `head -c32 /dev/urandom \| base64` | semaphore |
 | `CODE_SERVER_HASHED_PASSWORD` | ✅ | – | Argon2 hash of the code-server password. Contains `$`, so single quotes in `.env` | code-server |
 | `CODE_SERVER_WORKSPACE` | – | `app-workspace` (volume) | Project folder; a host path (owned by UID 1000) replaces the volume | code-server |
+| `GITLAB_ROOT_PASSWORD` | ✅ | – | Password of the root user, only used on the first start | gitlab |
+| `GITLAB_SSH_PORT` | – | `2222` | Host port for git over SSH | gitlab |
 
 ## Infrastructure (`npmplus` stack only)
 
 | Variable | Req. | Default | Description |
 |---|---|---|---|
 | `DOCKER_GID` | ✅ | – | Group ID of the Docker socket on the host: `ls -ln /var/run/docker.sock`. Also used by `beszel/docker-compose.remote-agent.yml`, which brings its own socket proxy |
-| `NPM_PROXY_NET_PREFIX` | – | `172.30.0` | First three octets of the `npm-proxy` subnet. Change only if it collides |
+| `NPM_PROXY_NET_PREFIX` | – | `172.30.0` | First three octets of the `npm-proxy` subnet. Change only if it collides. Also used by `gitlab` (trusted proxy IP) |
 | `NPM_PROXY_BRIDGE` | – | `br-npm` | Name of the Linux bridge of `npm-proxy` (used by `firewall`, max. 15 characters) |
 | `SOCKET_PROXY_NET_PREFIX` | – | `172.31.0` | First three octets of the `socket-proxy` subnet. Also used by the Beszel `agent` variant and by `telegraf`, which run in the host network and have to reach the socket proxy by IP |
 | `SOCKET_PROXY_BRIDGE` | – | `br-sockprx` | Name of the Linux bridge of `socket-proxy` (max. 15 characters) |

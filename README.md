@@ -29,6 +29,7 @@ The repository is public to back up and version the configuration, and as inspir
 | [mealie](mealie/) | Apps | Recipe manager with meal planner and shopping lists | – |
 | [tandoor](tandoor/) | Apps | Recipe manager with meal planning and nutrition data | – |
 | [code-server](code-server/) | Apps | VS Code in the browser, behind Authentik | – |
+| [gitlab](gitlab/) | Apps | Git hosting with merge requests, issues and CI/CD | – |
 
 Every stack folder contains a `docker-compose.yml`, a `.env.example` and a `README.md`.
 
