@@ -63,7 +63,7 @@ DB name and DB user are not variables. They are hard-coded in the compose file (
 
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
-| `AUTHENTIK_URL` | ◐ variant `authentik` / OIDC apps | – | Full URL of Authentik including scheme and port, e.g. `https://auth.example.com:443`. Used by NPMplus for forward auth and by apps for OIDC | npmplus, rdpgw |
+| `AUTHENTIK_URL` | ◐ variant `authentik` / OIDC apps | – | Full URL of Authentik including scheme and port, e.g. `https://auth.example.com:443`. Used by NPMplus for forward auth and by apps for OIDC | npmplus, rdpgw, grafana |
 
 ## Login via Authentik (OIDC)
 
@@ -74,6 +74,9 @@ OIDC client of an app at Authentik. Pattern: `<APP>_OIDC_CLIENT_ID` / `<APP>_OID
 | `RDPGW_OIDC_CLIENT_ID` | ✅ | – | Client ID of the Authentik provider | rdpgw |
 | `RDPGW_OIDC_CLIENT_SECRET` | ✅ | – | Client secret of the Authentik provider | rdpgw |
 | `RDPGW_OIDC_SLUG` | – | `rdpgw` | Slug of the application in Authentik | rdpgw |
+| `GRAFANA_OIDC_ENABLED` | – | `false` | Enable login via Authentik | grafana |
+| `GRAFANA_OIDC_CLIENT_ID` | ◐ if enabled | – | Client ID of the Authentik provider | grafana |
+| `GRAFANA_OIDC_CLIENT_SECRET` | ◐ if enabled | – | Client secret of the Authentik provider | grafana |
 
 ## Metrics (InfluxDB)
 
@@ -149,6 +152,8 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `TELEGRAF_INTERVAL` | – | `30s` | Collection interval | telegraf |
 | `TELEGRAF_HOSTNAME` | – | (host name) | Host name in the metrics | telegraf |
 | `TELEGRAF_HEALTH_PORT` | – | `8099` | Localhost port of the health endpoint (host network) | telegraf |
+| `GRAFANA_ADMIN_USER` | – | `admin` | Local admin user | grafana |
+| `GRAFANA_ADMIN_PASSWORD` | ✅ | – | Password of the local admin user, only used when the user is created | grafana |
 
 ## Infrastructure (`npmplus` stack only)
 

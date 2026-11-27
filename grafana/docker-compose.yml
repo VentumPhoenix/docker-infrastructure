@@ -1,0 +1,96 @@
+# Grafana – dashboards for metrics and logs (e.g. from InfluxDB)
+# Upstream: https://github.com/grafana/grafana
+# Requires: network npm-proxy (stack npmplus)
+# Updates: auto
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${GRAFANA_ADMIN_PASSWORD:?}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    <<: *hardened
+    image: grafana/grafana:latest
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      GF_SERVER_ROOT_URL: "https://${APP_DOMAIN}"
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # No telemetry, update checks or news feed
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      # Optional: login via Authentik (OIDC). Optional secret, so a plain env var (CONVENTIONS § 8)
+      GF_AUTH_GENERIC_OAUTH_ENABLED: ${GRAFANA_OIDC_ENABLED:-false}
+      GF_AUTH_GENERIC_OAUTH_NAME: Authentik
+      GF_AUTH_GENERIC_OAUTH_CLIENT_ID: ${GRAFANA_OIDC_CLIENT_ID:-}
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: ${GRAFANA_OIDC_CLIENT_SECRET:-}
+      GF_AUTH_GENERIC_OAUTH_SCOPES: "openid profile email"
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL: "${AUTHENTIK_URL:-}/application/o/authorize/"
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: "${AUTHENTIK_URL:-}/application/o/token/"
+      GF_AUTH_GENERIC_OAUTH_API_URL: "${AUTHENTIK_URL:-}/application/o/userinfo/"
+      GF_AUTH_GENERIC_OAUTH_USE_PKCE: "true"
+      # Authentik group "Grafana Admins" -> Admin, "Grafana Editors" -> Editor, everyone else Viewer
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH: "contains(groups[*], 'Grafana Admins') && 'Admin' || contains(groups[*], 'Grafana Editors') && 'Editor' || 'Viewer'"
+    secrets:
+      - admin_password
+    volumes:
+      - app-data:/var/lib/grafana
+    networks:
+      npm-proxy:
+      egress:   # data sources via their public URL (e.g. InfluxDB), OIDC with Authentik
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health || curl -fs -o /dev/null http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    pids_limit: 200
+    mem_limit: 512m
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "3000"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.grafana.http.name: "Grafana"
+      kuma.grafana.http.url: "https://${APP_DOMAIN}/api/health"
+      kuma.grafana.http.parent_name: "monitoring"
+      # Dashboard (Homepage)
+      homepage.group: "Monitoring"
+      homepage.name: "Grafana"
+      homepage.icon: "grafana"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Dashboards"
+
+secrets:
+  admin_password:
+    environment: GRAFANA_ADMIN_PASSWORD
+
+volumes:
+  app-data:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
