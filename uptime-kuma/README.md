@@ -12,5 +12,6 @@ Uptime monitoring with notifications. AutoKuma reads the `kuma.*` labels of all 
 
 ## Notes
 
+- **Remote hosts:** AutoKuma also reads the labels of other Docker hosts through their socket proxy (stack [remote-host](../remote-host/)). List them in `KUMA_REMOTE_DOCKER_HOSTS`, each starting with `;`, e.g. `;tcp://100.64.0.2:2375`. That's why `autokuma` joins `egress`.
 - The four Kuma groups are defined once, as labels on the `autokuma` service. Other stacks only reference them via `kuma.<id>.http.parent_name`.
 - `app` uses `x-base` instead of `x-hardened`: ping monitors need `NET_RAW`, and hardening hasn't been tested yet.

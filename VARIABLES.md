@@ -191,6 +191,7 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `DIRECTUS_ADMIN_PASSWORD` | ✅ | – | Password of the first Directus admin, only used on the first start | website |
 | `PRETIX_INSTANCE_NAME` | – | `pretix` | Name of the pretix instance in emails and the UI | website |
 | `NPM_AUTH_REQUEST_PROVIDERS` | – | `authentik` | Forward-auth providers of the central NPMplus, for remote syncs (`none` without Authentik) | remote-host |
+| `KUMA_REMOTE_DOCKER_HOSTS` | – | (empty) | Socket proxies of remote hosts for AutoKuma, each starting with `;`, e.g. `;tcp://100.64.0.2:2375` | uptime-kuma |
 
 ## Infrastructure (`npmplus` and `remote-host`)
 

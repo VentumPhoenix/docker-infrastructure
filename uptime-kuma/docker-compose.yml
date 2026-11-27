@@ -71,12 +71,15 @@ services:
       # Plain env vars (CONVENTIONS § 8 fallback)
       AUTOKUMA__KUMA__USERNAME: ${KUMA_SERVICE_USER}
       AUTOKUMA__KUMA__PASSWORD: ${KUMA_SERVICE_PASSWORD}
-      AUTOKUMA__DOCKER__HOSTS: tcp://${SOCKET_PROXY_HOST:-socket-proxy}:${SOCKET_PROXY_PORT:-2375}
+      # Local socket proxy, plus the socket proxies of remote hosts (stack remote-host), separated by ;
+      AUTOKUMA__DOCKER__HOSTS: "tcp://${SOCKET_PROXY_HOST:-socket-proxy}:${SOCKET_PROXY_PORT:-2375}${KUMA_REMOTE_DOCKER_HOSTS:-}"
     volumes:
       - autokuma-data:/data
     networks:
-      - internal
-      - socket-proxy
+      internal:
+      socket-proxy:
+      egress:   # socket proxies of remote hosts via NetBird
+        gw_priority: 1   # default route via egress
     healthcheck:
       # No curl/wget in the image -> bash /dev/tcp: are Kuma and the socket proxy reachable?
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/app/3001 && exec 4<>/dev/tcp/${SOCKET_PROXY_HOST:-socket-proxy}/${SOCKET_PROXY_PORT:-2375}"]

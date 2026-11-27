@@ -39,6 +39,10 @@ The entry point of the whole setup: reverse proxy with automatic certificates, p
 - **Socket proxy:** only read access. `containers/<name>/json` also returns other containers' environment variables, so only trusted services join `socket-proxy`.
 - **Updates:** manual. Switch off auto-update for this stack in Dockhand.
 
+### Remote hosts
+
+Other Docker hosts join through the [remote-host](../remote-host/) stack. Their syncs talk to the NPMplus admin API via NetBird: enable the commented port `"${NETBIRD_IP}:81:81"` in the compose file and set `NETBIRD_IP` to this host's NetBird IP. The port is then only reachable inside NetBird, restrict it further with a NetBird policy.
+
 ### Migrating from an existing network
 
 If your apps still sit in an older proxy network (e.g. `npm-frontend`), NPMplus can temporarily join both. Add this to the `app` service and the `networks` block, and remove it again once every app has moved to `npm-proxy`:
