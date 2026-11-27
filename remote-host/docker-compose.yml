@@ -1,0 +1,348 @@
+# Remote host – connects another Docker host (already in NetBird) to the central infrastructure:
+#   Dockhand (Hawser), Beszel (agent), NPMplus (npmplus-docker-sync), Uptime Kuma + Homepage (socket proxy)
+# Upstream: https://github.com/Finsys/hawser, https://github.com/henrygd/beszel,
+#           https://github.com/VentumPhoenix/npmplus-docker-sync, https://github.com/wollomatic/socket-proxy
+# Requires: NetBird on this host, Docker Engine 28+, the central host (see README)
+# Updates: manual – Dockhand deploys through Hawser, it can't update this stack reliably
+
+x-required:
+  - ${NETBIRD_IP:?NetBird IP of this host, e.g. 100.64.0.2}
+  - ${NETBIRD_CENTRAL_IP:?NetBird IP of the central host, e.g. 100.64.0.1}
+  - ${NPM_PROXY_NET_PREFIX:?unique per host, e.g. 172.30.1 (the central host uses 172.30.0)}
+  - ${DOCKER_GID:?ls -ln /var/run/docker.sock shows the group ID}
+  - ${REMOTE_HOST_NAME:?short name of this host, e.g. vps1}
+  - ${NPM_SERVICE_USER:?same service account as in the npmplus stack}
+  - ${NPM_SERVICE_PASSWORD:?}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  # Read-only Docker API for everything that needs it:
+  #   locally:  npmplus-docker-sync (network socket-proxy), Beszel agent (127.0.0.1)
+  #   central:  AutoKuma and Homepage via NetBird (NETBIRD_IP, only from NETBIRD_CENTRAL_IP)
+  socket-proxy:
+    <<: *hardened
+    image: wollomatic/socket-proxy:1
+    user: "65534"
+    group_add:
+      - "${DOCKER_GID}"
+    command:
+      - "-loglevel=info"
+      - "-listenip=0.0.0.0"
+      # sync in socket-proxy, localhost port via the egress gateway, central host via NetBird
+      - "-allowfrom=${SOCKET_PROXY_NET_PREFIX:-172.31.0}.0/24,${REMOTE_EGRESS_NET_PREFIX:-172.28.0}.1/32,${NETBIRD_CENTRAL_IP}/32"
+      # Read-only. containers/<name>/json also contains the environment variables of every container.
+      - '-allowGET=/(v1\.\d+/)?(_ping|version|info|events|containers/json|containers/[a-zA-Z0-9][a-zA-Z0-9_.-]*/(json|stats|logs))'
+      - '-allowHEAD=/(v1\.\d+/)?_ping'
+      - "-watchdoginterval=3600"
+      - "-stoponwatchdog"
+      - "-allowhealthcheck"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      # Exception: Beszel agent (host network) via localhost, AutoKuma/Homepage of the central host via NetBird
+      - "127.0.0.1:${SOCKET_PROXY_PORT:-2375}:2375"
+      - "${NETBIRD_IP}:${SOCKET_PROXY_PORT:-2375}:2375"
+    networks:
+      socket-proxy:
+        ipv4_address: ${SOCKET_PROXY_NET_PREFIX:-172.31.0}.2
+      egress:   # only for the published ports (not possible on an internal network)
+        gw_priority: 1   # default route via egress
+    healthcheck:
+      test: ["CMD", "./healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    read_only: true
+    pids_limit: 50
+    mem_limit: 64m
+
+  # Dockhand agent (edge mode): connects out to Dockhand, no inbound port
+  hawser:
+    <<: *hardened
+    image: ghcr.io/finsys/hawser:latest
+    profiles: ["hawser"]
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      DOCKHAND_SERVER_URL: ${HAWSER_SERVER_URL:-}
+      TOKEN_FILE: /run/secrets/hawser_token
+      AGENT_NAME: ${REMOTE_HOST_NAME}
+      BIND_ADDRESS: 127.0.0.1   # health endpoint only, inside the container
+      PORT: "2376"
+      STACKS_DIR: ${HAWSER_STACKS_DIR:-/opt/stacks}
+    secrets:
+      - hawser_token
+    volumes:
+      # Exception: like Dockhand, Hawser needs full write access to the Docker API
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Exception: stack folders on the host, same path inside and outside
+      - ${HAWSER_STACKS_DIR:-/opt/stacks}:${HAWSER_STACKS_DIR:-/opt/stacks}
+    networks:
+      egress:   # outbound WebSocket to Dockhand
+        gw_priority: 1   # default route via egress
+    healthcheck:   # same as the image's own healthcheck
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2376/_hawser/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    pids_limit: 500
+    mem_limit: 512m
+
+  # Beszel agent: the hub connects to it via NetBird
+  beszel-agent:
+    <<: *hardened
+    image: henrygd/beszel-agent:latest
+    profiles: ["beszel"]
+    depends_on:
+      socket-proxy:
+        condition: service_healthy
+    environment:
+      HUB_URL: ${BESZEL_HUB_URL:-}
+      KEY_FILE: /run/secrets/beszel_key
+      TOKEN_FILE: /run/secrets/beszel_token
+      # Listens on the NetBird IP only
+      LISTEN: "${NETBIRD_IP}:${BESZEL_AGENT_PORT:-45876}"
+      DOCKER_HOST: tcp://127.0.0.1:${SOCKET_PROXY_PORT:-2375}
+    secrets:
+      - beszel_key
+      - beszel_token
+    volumes:
+      - beszel-agent-data:/var/lib/beszel-agent
+      # Optional: monitor more disks, one folder per disk (see beszel README)
+      #- /mnt/disk1/.beszel:/extra-filesystems/sdb1:ro
+    network_mode: host   # real network statistics of the host
+    healthcheck:
+      test: ["CMD", "/agent", "health"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    pids_limit: 100
+    mem_limit: 128m
+
+  # npmplus-docker-sync: creates proxy hosts for the apps of THIS host in the central NPMplus.
+  # The central NPMplus reaches the apps directly in npm-proxy of this host (NetBird route, see README).
+  # Always on: it also keeps npm-proxy in existence (Compose only creates networks a service uses).
+  npmplus-sync:
+    <<: *hardened
+    image: ghcr.io/ventumphoenix/npmplus-docker-sync:latest
+    depends_on:
+      socket-proxy:
+        condition: service_healthy
+    environment:
+      DOCKER_HOST: tcp://${SOCKET_PROXY_NET_PREFIX:-172.31.0}.2:2375
+      # NPMplus admin API of the central host, via NetBird
+      NPM_URL: https://${NETBIRD_CENTRAL_IP}:81
+      NPM_INSECURE_SKIP_VERIFY: "true"   # internal self-signed certificate of the UI
+      NPM_IDENTITY: ${NPM_SERVICE_USER}
+      NPM_SECRET_FILE: /run/secrets/npm_password
+      NPM_FLAVOUR: npmplus
+      # Upstream = container IP in npm-proxy of this host
+      NPM_NETWORK: ${NPM_PROXY_NETWORK:-npm-proxy}
+      # NPMplus runs elsewhere, so its forward-auth providers can't be detected
+      NPM_AUTH_REQUEST_PROVIDERS: ${NPM_AUTH_REQUEST_PROVIDERS:-authentik}
+      # Shared NPMplus: never touch hosts of other instances or hand-made ones
+      SYNC_INSTANCE_ID: npmplus-docker-sync-${REMOTE_HOST_NAME}
+      DELETE_ORPHANS: "false"
+      ADOPT_EXISTING: "false"
+      NPM_DEFAULT_GROUP: ${REMOTE_HOST_NAME}
+      NPM_CERTIFICATE_AUTO_CREATE: "true"
+      HEALTH_ADDR: 127.0.0.1:8080
+    secrets:
+      - npm_password
+    networks:
+      npm-proxy:   # like docker-sync on the central host; creates the network for the app stacks
+      socket-proxy:
+        ipv4_address: ${SOCKET_PROXY_NET_PREFIX:-172.31.0}.3
+      egress:   # NPMplus API of the central host via NetBird
+        gw_priority: 1   # default route via egress
+    healthcheck:
+      test: ["CMD", "/npmplus-docker-sync", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    read_only: true
+    pids_limit: 100
+    mem_limit: 256m
+
+  # Same rules as on the central host, adapted for a remote npm-proxy:
+  #   npm-proxy:    reachable only from the central host (NETBIRD_CENTRAL_IP), no internet,
+  #                 no access to this host; apps can't reach each other (ICC off)
+  #   socket-proxy: clients only to the socket proxy (.2), no access to this host
+  # A missing rule means blocked (fail-closed). The healthcheck verifies everything.
+  firewall:
+    # Needs NET_ADMIN in the host network, so no *hardened
+    <<: *base
+    image: alpine:3.24
+    command:
+      - /bin/sh
+      - -c
+      - |
+        until apk add --no-cache iptables >/dev/null 2>&1; do
+          echo "apk add failed, retrying in 10s"
+          sleep 10
+        done
+        if iptables-nft -n -L DOCKER-USER >/dev/null 2>&1; then
+          IPT=iptables-nft
+        else
+          IPT=iptables-legacy
+        fi
+        echo "using $$IPT"
+        TAG="remote-host-stack"
+        D=/run/fw
+        mkdir -p $$D
+        rm -f $$D/status $$D/heartbeat $$D/canon
+
+        # Desired rules: "<chain> <rule>". Each one is inserted at the top of its chain,
+        # so per chain the FIRST line ends up LAST: every DROP must stay above its ACCEPTs.
+        CHAINS="DOCKER-USER INPUT"
+        cat > $$D/rules <<'EOF'
+        DOCKER-USER ! -i ${NPM_PROXY_BRIDGE:-br-npm} -o ${NPM_PROXY_BRIDGE:-br-npm} -j DROP
+        DOCKER-USER -i ${NPM_PROXY_BRIDGE:-br-npm} ! -o ${NPM_PROXY_BRIDGE:-br-npm} -j DROP
+        DOCKER-USER -i ${NPM_PROXY_BRIDGE:-br-npm} ! -o ${NPM_PROXY_BRIDGE:-br-npm} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        DOCKER-USER ! -i ${NPM_PROXY_BRIDGE:-br-npm} -o ${NPM_PROXY_BRIDGE:-br-npm} -s ${NETBIRD_CENTRAL_IP} -j ACCEPT
+        DOCKER-USER -i ${SOCKET_PROXY_BRIDGE:-br-sockprx} -o ${SOCKET_PROXY_BRIDGE:-br-sockprx} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        DOCKER-USER -i ${SOCKET_PROXY_BRIDGE:-br-sockprx} -o ${SOCKET_PROXY_BRIDGE:-br-sockprx} -d ${SOCKET_PROXY_NET_PREFIX:-172.31.0}.2 -j ACCEPT
+        INPUT -i ${NPM_PROXY_BRIDGE:-br-npm} -j DROP
+        INPUT -i ${NPM_PROXY_BRIDGE:-br-npm} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        INPUT -i ${SOCKET_PROXY_BRIDGE:-br-sockprx} -j DROP
+        INPUT -i ${SOCKET_PROXY_BRIDGE:-br-sockprx} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        EOF
+        WANT=$$(grep -c . $$D/rules)
+
+        # Healthcheck: no iptables, only status + age of the last run
+        cat > /usr/local/bin/fw-health <<'EOF'
+        #!/bin/sh
+        D=/run/fw
+        [ -s $$D/heartbeat ] || { echo "no run completed yet"; exit 1; }
+        age=$$(( $$(date +%s) - $$(cat $$D/heartbeat) ))
+        [ "$$age" -lt 300 ] || { echo "loop stuck: last run $${age}s ago"; exit 1; }
+        echo "$$(cat $$D/status) (last run $${age}s ago)"
+        grep -q '^OK' $$D/status
+        EOF
+        chmod +x /usr/local/bin/fw-health
+
+        cleanup() {
+          for c in $$CHAINS; do
+            $$IPT -S $$c | grep -- "--comment $$TAG" | sed 's/^-A/-D/' \
+              | while read -r rule; do eval "$$IPT $$rule"; done
+          done
+        }
+        apply() {
+          cleanup
+          while read -r c r; do
+            [ -n "$$c" ] || continue
+            $$IPT -I $$c $$r -m comment --comment "$$TAG"
+          done < $$D/rules
+          # How iptables prints our own rules = desired state for the comparison
+          for c in $$CHAINS; do $$IPT -S $$c | grep -- "--comment $$TAG"; done > $$D/canon
+        }
+
+        apply
+        trap 'echo "removing rules"; cleanup; exit 0' TERM INT
+
+        while true; do
+          # 1 call per chain: own rules complete, not duplicated and at the top?
+          n=0
+          ontop=1
+          for c in $$CHAINS; do
+            cur=$$($$IPT -S $$c | grep '^-A')
+            mine=$$(grep -- "^-A $$c " $$D/canon)
+            k=$$(echo "$$mine" | grep -c .)
+            n=$$((n + $$(echo "$$cur" | grep -c -- "--comment $$TAG")))
+            [ "$$(echo "$$cur" | head -n "$$k")" = "$$mine" ] || ontop=0
+          done
+          if [ "$$n" -ne "$$WANT" ] || [ "$$ontop" -ne 1 ]; then
+            echo "rules missing, duplicated or not at the top ($$n/$$WANT) - reapplying"
+            apply
+          fi
+
+          # Docker's ICC DROP present?
+          msg=""
+          icc=$$(for c in DOCKER-FORWARD FORWARD; do $$IPT -S $$c 2>/dev/null; done)
+          for br in ${NPM_PROXY_BRIDGE:-br-npm} ${SOCKET_PROXY_BRIDGE:-br-sockprx}; do
+            [ -d /sys/class/net/$$br ] || msg="$$msg bridge $$br missing;"
+            echo "$$icc" | grep -q -- "-i $$br -o $$br -j DROP" || msg="$$msg ICC DROP $$br missing;"
+          done
+          [ "$$(grep -c . $$D/canon)" -eq "$$WANT" ] || msg="$$msg only $$(grep -c . $$D/canon)/$$WANT rules set;"
+
+          if [ -z "$$msg" ]; then
+            echo "OK: $$WANT rules active ($$IPT), ICC DROP present" > $$D/status
+          else
+            echo "ERROR:$$msg" > $$D/status
+            echo "ERROR:$$msg"
+          fi
+          date +%s > $$D/heartbeat
+          sleep 60 &
+          wait $$!
+        done
+    network_mode: host
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/fw-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+    cap_add:
+      - NET_ADMIN   # manages iptables rules in DOCKER-USER and INPUT
+    pids_limit: 50
+    mem_limit: 64m
+    stop_grace_period: 120s   # cleanup needs several slow iptables calls
+
+secrets:
+  hawser_token:
+    environment: HAWSER_TOKEN
+  beszel_key:
+    environment: BESZEL_AGENT_KEY
+  beszel_token:
+    environment: BESZEL_AGENT_TOKEN
+  npm_password:
+    environment: NPM_SERVICE_PASSWORD
+
+volumes:
+  beszel-agent-data:
+
+networks:
+  # Same name as on the central host, so app stacks run here unchanged.
+  # Unique subnet per host; the central host reaches it via a NetBird route.
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: ${NPM_PROXY_BRIDGE:-br-npm}
+      com.docker.network.bridge.enable_icc: "false"
+      # Docker 28+: allow direct routing to the apps; the firewall above limits it to the central host
+      com.docker.network.bridge.gateway_mode_ipv4: nat-unprotected
+    ipam:
+      config:
+        - subnet: ${NPM_PROXY_NET_PREFIX}.0/24
+  socket-proxy:   # internal: no way out
+    name: ${SOCKET_PROXY_NETWORK:-socket-proxy}
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.name: ${SOCKET_PROXY_BRIDGE:-br-sockprx}
+      com.docker.network.bridge.enable_icc: "false"
+    ipam:
+      config:
+        - subnet: ${SOCKET_PROXY_NET_PREFIX:-172.31.0}.0/24
+          ip_range: ${SOCKET_PROXY_NET_PREFIX:-172.31.0}.128/25   # fixed IPs below .128
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+    ipam:
+      config:
+        - subnet: ${REMOTE_EGRESS_NET_PREFIX:-172.28.0}.0/24   # fixed, the socket proxy allows its gateway

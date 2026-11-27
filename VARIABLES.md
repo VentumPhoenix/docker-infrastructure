@@ -40,7 +40,17 @@ These must have the **same value in every stack**.
 | `NPM_PROXY_NETWORK` | – | `npm-proxy` | Name of the reverse proxy network | every stack |
 | `SOCKET_PROXY_NETWORK` | – | `socket-proxy` | Name of the Docker API network | npmplus, homepage, uptime-kuma |
 | `SOCKET_PROXY_HOST` | – | `socket-proxy` | Host name under which the socket proxy is reached | homepage, uptime-kuma |
-| `SOCKET_PROXY_PORT` | – | `2375` | Port of the socket proxy | homepage, uptime-kuma, beszel |
+| `SOCKET_PROXY_PORT` | – | `2375` | Port of the socket proxy | homepage, uptime-kuma, beszel, remote-host |
+
+## NetBird (remote hosts)
+
+| Variable | Req. | Default | Description | Used in |
+|---|---|---|---|---|
+| `NETBIRD_IP` | ✅ | – | NetBird IP of **this** host. On the central host: where the NPMplus admin API is published for remote syncs | remote-host, npmplus |
+| `NETBIRD_CENTRAL_IP` | ✅ | – | NetBird IP of the central host (NPMplus, Dockhand, Beszel, Uptime Kuma) | remote-host |
+| `REMOTE_HOST_NAME` | ✅ | – | Short name of a remote host: agent name in Dockhand, group of its proxy hosts in NPMplus | remote-host |
+| `REMOTE_EGRESS_NET_PREFIX` | – | `172.28.0` | Subnet of the egress network of the remote-host stack (the socket proxy allows its gateway) | remote-host |
+| `COMPOSE_PROFILES` | ✅ | – | Optional parts of the remote-host stack: `hawser`, `beszel` | remote-host |
 
 ## Database
 
@@ -103,8 +113,8 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
-| `NPM_SERVICE_USER` | ✅ | – | Email of the NPMplus account that `npmplus-docker-sync` logs in with. Also becomes the initial admin on first start | npmplus |
-| `NPM_SERVICE_PASSWORD` | ✅ | – | Password of that account | npmplus |
+| `NPM_SERVICE_USER` | ✅ | – | Email of the NPMplus account that `npmplus-docker-sync` logs in with. Also becomes the initial admin on first start | npmplus, remote-host |
+| `NPM_SERVICE_PASSWORD` | ✅ | – | Password of that account | npmplus, remote-host |
 | `KUMA_SERVICE_USER` | ✅ | – | Uptime Kuma user that AutoKuma logs in with | uptime-kuma |
 | `KUMA_SERVICE_PASSWORD` | ✅ | – | Password of that user | uptime-kuma |
 
@@ -125,8 +135,8 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `CROWDSEC_BOUNCER_KEY` | ◐ variant `crowdsec` | – | Shared key between the NPMplus bouncer and CrowdSec. Generate: `openssl rand -hex 32` | npmplus |
 | `CROWDSEC_ENROLL_KEY` | – | – | Connects the instance to the CrowdSec Console | npmplus |
 | `CROWDSEC_INSTANCE_NAME` | – | – | Name of the instance in the CrowdSec Console | npmplus |
-| `BESZEL_AGENT_KEY` | ◐ `agent`, `remote-agent` | – | Public key of the hub, shown in the Beszel UI when adding a system | beszel |
-| `BESZEL_AGENT_TOKEN` | ◐ `agent`, `remote-agent` | – | Registration token from the Beszel UI | beszel |
+| `BESZEL_AGENT_KEY` | ◐ variant `agent`, profile `beszel` | – | Public key of the hub, shown in the Beszel UI when adding a system | beszel, remote-host |
+| `BESZEL_AGENT_TOKEN` | ◐ variant `agent`, profile `beszel` | – | Registration token from the Beszel UI | beszel, remote-host |
 | `DOCKHAND_STACKS_DIR` | – | `/opt/stacks` | Folder on the host with the stack folders Dockhand deploys | dockhand |
 | `RDPGW_SESSION_KEY` | ✅ | – | Session key, exactly 32 characters. Generate: `openssl rand -hex 16` | rdpgw |
 | `RDPGW_SESSION_ENCRYPTION_KEY` | ✅ | – | Session encryption key, 32 characters, different from the others | rdpgw |
@@ -146,13 +156,11 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `NETBIRD_STORE_ENCRYPTION_KEY` | ✅ | – | Encryption key of the NetBird database. Generate: `openssl rand -base64 32`. Never change it after setup | netbird |
 | `NETBIRD_STUN_PORT` | – | `3478` | Host port (UDP) for STUN | netbird |
 | `RCLONE_LOG_LEVEL` | – | `INFO` | Log level of rclone (`DEBUG`, `INFO`, `NOTICE`, `ERROR`) | nextcloud |
-| `HAWSER_SERVER_URL` | ✅ | – | WebSocket URL of Dockhand for this agent (`wss://…`), shown in Dockhand | dockhand (`hawser`) |
-| `HAWSER_TOKEN` | ✅ | – | Token of this agent, shown in Dockhand | dockhand (`hawser`) |
-| `HAWSER_AGENT_NAME` | – | (empty) | Name of the host in Dockhand | dockhand (`hawser`) |
-| `HAWSER_STACKS_DIR` | – | `/opt/stacks` | Folder on the host with the stack folders Dockhand deploys there | dockhand (`hawser`) |
-| `BESZEL_HUB_URL` | ✅ | – | URL of the Beszel hub the agent reports to | beszel (`remote-agent`) |
-| `BESZEL_AGENT_PORT` | – | `45876` | Port on the host the hub connects to | beszel (`remote-agent`) |
-| `BESZEL_SOCKET_PROXY_PORT` | – | `2375` | Localhost port of the agent's own socket proxy | beszel (`remote-agent`) |
+| `HAWSER_SERVER_URL` | ◐ profile `hawser` | – | WebSocket URL of Dockhand for this agent (`wss://…`), shown in Dockhand | remote-host |
+| `HAWSER_TOKEN` | ◐ profile `hawser` | – | Token of this agent, shown in Dockhand | remote-host |
+| `HAWSER_STACKS_DIR` | – | `/opt/stacks` | Folder on the host with the stack folders Dockhand deploys there | remote-host |
+| `BESZEL_HUB_URL` | ◐ profile `beszel` | – | URL of the Beszel hub the agent reports to | remote-host |
+| `BESZEL_AGENT_PORT` | – | `45876` | Port on the NetBird IP the hub connects to | remote-host |
 | `TELEGRAF_INTERVAL` | – | `30s` | Collection interval | influxdb (`telegraf`) |
 | `TELEGRAF_HOSTNAME` | – | (host name) | Host name in the metrics | influxdb (`telegraf`) |
 | `TELEGRAF_HEALTH_PORT` | – | `8099` | Localhost port of the health endpoint (host network) | influxdb (`telegraf`) |
@@ -182,13 +190,14 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `DIRECTUS_ADMIN_EMAIL` | ✅ | – | First Directus admin, only used on the first start | website |
 | `DIRECTUS_ADMIN_PASSWORD` | ✅ | – | Password of the first Directus admin, only used on the first start | website |
 | `PRETIX_INSTANCE_NAME` | – | `pretix` | Name of the pretix instance in emails and the UI | website |
+| `NPM_AUTH_REQUEST_PROVIDERS` | – | `authentik` | Forward-auth providers of the central NPMplus, for remote syncs (`none` without Authentik) | remote-host |
 
-## Infrastructure (`npmplus` stack only)
+## Infrastructure (`npmplus` and `remote-host`)
 
 | Variable | Req. | Default | Description |
 |---|---|---|---|
-| `DOCKER_GID` | ✅ | – | Group ID of the Docker socket on the host: `ls -ln /var/run/docker.sock`. Also used by `beszel/docker-compose.remote-agent.yml` and `influxdb/docker-compose.telegraf.yml`, which bring their own socket proxy |
-| `NPM_PROXY_NET_PREFIX` | – | `172.30.0` | First three octets of the `npm-proxy` subnet. Change only if it collides. Also used by `gitlab` (trusted proxy IP) |
+| `DOCKER_GID` | ✅ | – | Group ID of the Docker socket on the host: `ls -ln /var/run/docker.sock`. Also used by `remote-host` and `influxdb/docker-compose.telegraf.yml`, which bring their own socket proxy |
+| `NPM_PROXY_NET_PREFIX` | – | `172.30.0` | First three octets of the `npm-proxy` subnet. Change only if it collides. Also used by `gitlab` (trusted proxy IP). **Required and unique per host** in `remote-host` (e.g. `172.30.1`) |
 | `NPM_PROXY_BRIDGE` | – | `br-npm` | Name of the Linux bridge of `npm-proxy` (used by `firewall`, max. 15 characters) |
 | `SOCKET_PROXY_NET_PREFIX` | – | `172.31.0` | First three octets of the `socket-proxy` subnet. Also used by the Beszel `agent` variant, which runs in the host network and has to reach the socket proxy by IP |
 | `SOCKET_PROXY_BRIDGE` | – | `br-sockprx` | Name of the Linux bridge of `socket-proxy` (max. 15 characters) |

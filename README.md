@@ -9,15 +9,16 @@ The repository is public to back up and version the configuration, and as inspir
 | Stack | Group | What it does | Variants |
 |---|---|---|---|
 | [npmplus](npmplus/) | Infrastructure | Reverse proxy, certificates, Docker label sync, socket proxy, firewall. **Deploy first.** | `authentik`, `crowdsec`, `authentik-crowdsec` |
-| [dockhand](dockhand/) | Infrastructure | Deploys and updates all other stacks. Hawser agent for other hosts included | `hawser` (other hosts) |
+| [dockhand](dockhand/) | Infrastructure | Deploys and updates all other stacks | – |
 | [netbird](netbird/) | Infrastructure | Self-hosted WireGuard mesh VPN | – |
 | [rdpgw](rdpgw/) | Infrastructure | Remote desktop gateway (RDP over HTTPS), login via Authentik | – |
 | [semaphore](semaphore/) | Infrastructure | Web UI for Ansible, Terraform/OpenTofu and scripts | – |
+| [remote-host](remote-host/) | Infrastructure | Connects another Docker host via NetBird: Dockhand (Hawser), Beszel agent, NPMplus sync, socket proxy for Uptime Kuma and Homepage | – |
 | [authentik](authentik/) | Security | Single sign-on (OIDC) and forward auth | – |
 | [vaultwarden](vaultwarden/) | Security | Bitwarden-compatible password manager | – |
 | [wazuh](wazuh/) | Security | Security monitoring (SIEM/XDR) with agents | – |
 | [uptime-kuma](uptime-kuma/) | Monitoring | Uptime monitoring, monitors created from labels (AutoKuma) | – |
-| [beszel](beszel/) | Monitoring | Server and container monitoring | `agent`, `remote-agent` (other hosts) |
+| [beszel](beszel/) | Monitoring | Server and container monitoring | `agent` |
 | [homepage](homepage/) | Monitoring | Dashboard, filled from labels | – |
 | [influxdb](influxdb/) | Monitoring | Time series database for metrics. Telegraf collector for every host included | `telegraf` (every host) |
 | [grafana](grafana/) | Monitoring | Dashboards for metrics (InfluxDB) | – |
