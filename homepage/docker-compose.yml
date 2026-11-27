@@ -44,6 +44,10 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    cap_add:   # entrypoint fixes ownership of /app/config and drops to PUID/PGID (su-exec)
+      - CHOWN
+      - SETUID
+      - SETGID
     pids_limit: 200
     mem_limit: 512m
     labels:
