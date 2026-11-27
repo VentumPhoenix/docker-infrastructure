@@ -1,0 +1,84 @@
+# Vaultwarden – lightweight Bitwarden-compatible password manager server
+# Upstream: https://github.com/dani-garcia/vaultwarden
+# Requires: network npm-proxy (stack npmplus)
+# Updates: auto
+
+x-required:
+  - ${APP_DOMAIN:?}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    <<: *hardened
+    image: vaultwarden/server:latest
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      DOMAIN: "https://${APP_DOMAIN}"
+      # Port above 1024, so no capability is needed to bind it
+      ROCKET_PORT: "8080"
+      # Registration: open by default, optionally only for some email domains
+      # and only after the email address is confirmed (needs the email settings below)
+      SIGNUPS_ALLOWED: ${VAULTWARDEN_SIGNUPS_ALLOWED:-true}
+      SIGNUPS_DOMAINS_WHITELIST: ${VAULTWARDEN_SIGNUPS_DOMAINS:-}
+      SIGNUPS_VERIFY: ${VAULTWARDEN_SIGNUPS_VERIFY:-false}
+      # Admin page at /admin: disabled while empty. Optional secret, so a plain env var (CONVENTIONS § 8)
+      ADMIN_TOKEN: ${VAULTWARDEN_ADMIN_TOKEN:-}
+      # Email (STARTTLS on port 587)
+      SMTP_HOST: ${EMAIL_HOST:-}
+      SMTP_PORT: ${EMAIL_PORT:-587}
+      SMTP_SECURITY: starttls
+      SMTP_USERNAME: ${EMAIL_USERNAME:-}
+      SMTP_PASSWORD: ${EMAIL_PASSWORD:-}
+      SMTP_FROM: ${EMAIL_FROM:-}
+    volumes:
+      - app-data:/data
+    networks:
+      npm-proxy:
+      egress:   # sends email, downloads website icons for vault entries
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
+    healthcheck:   # same as the image's own healthcheck (reads ROCKET_PORT)
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    pids_limit: 200
+    mem_limit: 256m
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "8080"
+      npm.proxy.scheme: "http"
+      # Monitoring (AutoKuma)
+      kuma.vaultwarden.http.name: "Vaultwarden"
+      kuma.vaultwarden.http.url: "https://${APP_DOMAIN}/alive"
+      kuma.vaultwarden.http.parent_name: "security"
+      # Dashboard (Homepage)
+      homepage.group: "Security"
+      homepage.name: "Vaultwarden"
+      homepage.icon: "vaultwarden"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "Password manager"
+
+volumes:
+  app-data:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"

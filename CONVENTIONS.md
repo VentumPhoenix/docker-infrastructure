@@ -506,10 +506,12 @@ Updates are handled by Dockhand. Whether a stack may update automatically is dec
 | `manual` if … | Examples |
 |---|---|
 | the stack is critical infrastructure and everything else depends on it | NPMplus, socket proxy, Authentik |
-| updates run database or data migrations | Authentik, apps with breaking releases |
+| updates run risky migrations across several services (app + worker + separate database), or a major upgrade must be done step by step | Authentik, Nextcloud, Paperless |
 | the project often ships breaking changes or has no stable tags | beta images, young projects |
 
-Everything else is `auto`. The tag must match the policy:
+Everything else is `auto`. That includes single-container apps that run their own small migrations reliably and benefit from fast security fixes (e.g. Vaultwarden). An `auto` stack relies on two safety nets: the regular backup and its Uptime Kuma monitor, which reports a failed update.
+
+The tag must match the policy:
 - `auto`: a moving tag (major tag or `latest`), so Dockhand finds updates.
 - `manual`: preferably a tag that only changes when you change it in the file (exact version, or `${APP_VERSION}`). If the project publishes no usable version tags, `latest` is acceptable. Auto-update must then be switched off for this stack in Dockhand.
 - Database images are always pinned to their major version, even in `auto` stacks. A major upgrade of a database is never automatic.

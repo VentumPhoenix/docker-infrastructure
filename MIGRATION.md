@@ -44,6 +44,10 @@ Update the names in your `.env` files. Values stay the same.
 | `NPM_PROXY_DOMAIN` | `APP_DOMAIN` | rdpgw |
 | `RDPGW_OPEN_ID_CLIENT_SECRET` | `RDPGW_OIDC_CLIENT_SECRET` | rdpgw |
 | `NPM_PROXY_PORT`, `NPM_PROXY_SCHEME` | removed (fixed in the compose file) | rdpgw |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USERNAME`, `EMAIL_PASSWORD`, `EMAIL_FROM` | vaultwarden |
+| `ADMIN_TOKEN` | `VAULTWARDEN_ADMIN_TOKEN` | vaultwarden |
+| `SIGNUPS_ALLOWED` | `VAULTWARDEN_SIGNUPS_ALLOWED` (default `true`, as before) | vaultwarden |
+| `SMTP_SSL`, `WEBSOCKET_ENABLED` | removed (`SMTP_SECURITY: starttls` fixed, WebSockets run on the normal port) | vaultwarden |
 
 **New variables for values that used to be hard-coded:**
 
@@ -85,6 +89,7 @@ Update the names in your `.env` files. Values stay the same.
 | nextcloud | `virus_db` | `clamav-data` (can also start empty, it downloads again) |
 | nextcloud | `rclone_cache` | `rclone-sftp-cache` (can start empty) |
 | netbird | `netbird_data` | `server-data` |
+| vaultwarden | `data` | `app-data` ⚠️ contains the whole vault. Stop the old container before copying |
 
 `crowdsec-config`, `crowdsec-data` (npmplus) and `autokuma-data` (uptime-kuma) keep their names.
 
@@ -126,5 +131,6 @@ Delete the old volumes only once the stack runs correctly: `docker volume rm <pr
 | sillytavern | The hand-written Authentik config in `npm.proxy.advanced.config` is replaced by `npm.proxy.auth_request: "authentik"`. `npm.proxy.domain` → `npm.proxy.domains`. Service `gluetun` → `vpn`, so the request proxy in SillyTavern's `config.yaml` becomes `http://vpn:8888`. |
 | netbird | `config.yaml` and `dashboard.env` are now inline in the compose file. Copy `authSecret` and `store.encryptionKey` from the old `config.yaml` into `.env` **unchanged**, and compare the rest (see [netbird/README.md](netbird/README.md#migrating-from-an-existing-setup)). |
 | netbird | `netbird-dashboard` → `app`, `netbird-server` → `server` (reachable for NPMplus under the alias `netbird-server`). The proxy host now comes from labels: **delete the manual proxy host in NPMplus first.** |
+| vaultwarden | Was deployed via Portainer in the network `nginx-proxy-manager_default`. Now Dockhand + `npm-proxy`, proxy host from labels: **delete the old proxy host in NPMplus first.** The volume name depends on the old Portainer stack name, check it with `docker volume ls`. |
 | rdpgw, sillytavern | Network-specific `extra_hosts` are commented out in the repo. Uncomment and adjust them locally. |
 | hastebin, uptime-kuma, authentik | Stack network `internal` is now `internal: true` (no internet access). Services that need the internet are in `egress`. |

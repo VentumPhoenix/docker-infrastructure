@@ -53,11 +53,11 @@ DB name and DB user are not variables. They are hard-coded in the compose file (
 
 | Variable | Req. | Default | Description | Used in |
 |---|---|---|---|---|
-| `EMAIL_HOST` | ◐ if the app should send email | – | SMTP server | authentik |
-| `EMAIL_PORT` | – | `587` | SMTP port. 587 = STARTTLS, which every stack uses | authentik |
-| `EMAIL_USERNAME` | – | – | SMTP login | authentik |
-| `EMAIL_PASSWORD` | – | – | SMTP password | authentik |
-| `EMAIL_FROM` | – | – | Sender address, e.g. `Authentik <auth@example.com>` | authentik |
+| `EMAIL_HOST` | ◐ if the app should send email | – | SMTP server | authentik, vaultwarden |
+| `EMAIL_PORT` | – | `587` | SMTP port. 587 = STARTTLS, which every stack uses | authentik, vaultwarden |
+| `EMAIL_USERNAME` | – | – | SMTP login | authentik, vaultwarden |
+| `EMAIL_PASSWORD` | – | – | SMTP password | authentik, vaultwarden |
+| `EMAIL_FROM` | – | – | Sender address, e.g. `Authentik <auth@example.com>` | authentik, vaultwarden |
 
 ## Shared services
 
@@ -114,6 +114,10 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `PAPERLESS_SECRET_KEY` | ✅ | – | Key for signing sessions and tokens. Generate: `openssl rand -hex 32` | paperless |
 | `PAPERLESS_OCR_LANGUAGE` | – | `deu+eng` | OCR languages, joined with `+` | paperless |
 | `PAPERLESS_CONSUME_DIR` | – | `app-consume` (volume) | Folder for new documents. A host path (e.g. scanner share) replaces the volume | paperless |
+| `VAULTWARDEN_SIGNUPS_ALLOWED` | – | `true` | Allow anyone who can reach the domain to create an account | vaultwarden |
+| `VAULTWARDEN_SIGNUPS_DOMAINS` | – | (empty = all) | Only these email domains may register, comma-separated | vaultwarden |
+| `VAULTWARDEN_SIGNUPS_VERIFY` | – | `false` | Email address must be confirmed before the first login (needs `EMAIL_*`) | vaultwarden |
+| `VAULTWARDEN_ADMIN_TOKEN` | – | (empty = admin page disabled) | Argon2 hash for the admin page (`/vaultwarden hash`). Contains `$`, so single quotes in `.env` | vaultwarden |
 | `RCLONE_AUTH_FILE` | – | `/opt/rclone-sftp/auth.json` | Credentials file of the SFTP server on the host | nextcloud |
 | `RCLONE_SFTP_PORT` | – | `18022` | Host port of the SFTP server | nextcloud |
 | `NETBIRD_AUTH_SECRET` | ✅ | – | Shared secret of the NetBird relay. Generate: `openssl rand -hex 32` | netbird |
