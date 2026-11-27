@@ -161,6 +161,8 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `SEMAPHORE_ADMIN_EMAIL` | – | `admin@localhost` | Email of the first admin | semaphore |
 | `SEMAPHORE_ADMIN_PASSWORD` | ✅ | – | Password of the first admin, only used on the first start | semaphore |
 | `SEMAPHORE_ACCESS_KEY_ENCRYPTION` | ✅ | – | Encrypts stored SSH keys and passwords. Never change it. Generate: `head -c32 /dev/urandom \| base64` | semaphore |
+| `CODE_SERVER_HASHED_PASSWORD` | ✅ | – | Argon2 hash of the code-server password. Contains `$`, so single quotes in `.env` | code-server |
+| `CODE_SERVER_WORKSPACE` | – | `app-workspace` (volume) | Project folder; a host path (owned by UID 1000) replaces the volume | code-server |
 
 ## Infrastructure (`npmplus` stack only)
 

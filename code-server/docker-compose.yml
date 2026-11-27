@@ -1,0 +1,76 @@
+# code-server – VS Code in the browser
+# Upstream: https://github.com/coder/code-server
+# Requires: network npm-proxy (stack npmplus, variant authentik)
+# Updates: auto
+
+x-required:
+  - ${APP_DOMAIN:?}
+  - ${CODE_SERVER_HASHED_PASSWORD:?argon2 hash, see README}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    # Runs as user 1000. no-new-privileges also disables the image's passwordless sudo.
+    <<: *hardened
+    image: codercom/code-server:latest
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      # Own login on top of Authentik. Plain env var: code-server only reads it from env or its config file
+      HASHED_PASSWORD: ${CODE_SERVER_HASHED_PASSWORD}
+    volumes:
+      - app-home:/home/coder
+      # Named volume by default. Set CODE_SERVER_WORKSPACE to a host path to edit files on the host.
+      - ${CODE_SERVER_WORKSPACE:-app-workspace}:/home/coder/project
+    networks:
+      npm-proxy:
+      egress:   # extensions (Open VSX), git, package managers
+        gw_priority: 1   # default route via egress, npm-proxy has no internet
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    pids_limit: 1000
+    mem_limit: 2g
+    labels:
+      # Reverse proxy (npmplus-docker-sync)
+      npm.proxy.domains: ${APP_DOMAIN}
+      npm.proxy.port: "8080"
+      npm.proxy.scheme: "http"
+      # Authentik forward auth: a browser IDE is a shell on the server, so two logins
+      npm.proxy.auth_request: "authentik"
+      # Monitoring (AutoKuma)
+      kuma.code-server.http.name: "code-server"
+      kuma.code-server.http.url: "https://${APP_DOMAIN}/healthz"
+      kuma.code-server.http.parent_name: "apps"
+      # Dashboard (Homepage)
+      homepage.group: "Apps"
+      homepage.name: "code-server"
+      homepage.icon: "code-server"
+      homepage.href: "https://${APP_DOMAIN}"
+      homepage.description: "VS Code"
+
+volumes:
+  app-home:
+  app-workspace:
+
+networks:
+  npm-proxy:
+    name: ${NPM_PROXY_NETWORK:-npm-proxy}
+    external: true
+  egress:
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
