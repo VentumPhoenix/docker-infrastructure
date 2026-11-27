@@ -95,7 +95,7 @@ cidr_range() {
 }
 
 overlaps() {
-  local a b
+  local a1 a2 b1 b2
   read -r a1 a2 <<<"$(cidr_range "$1")"
   read -r b1 b2 <<<"$(cidr_range "$2")"
   [ "$a1" -le "$b2" ] && [ "$b1" -le "$a2" ]
@@ -445,7 +445,8 @@ cmd_finish() {
   ok "removed $OLD"
   for net in $(state_get OLD_NETS); do
     case $net in "$NPM_NET"|bridge) continue ;; esac
-    docker network rm "$net" >/dev/null 2>&1 && ok "removed network $net" || warn "network $net not removed"
+    if docker network rm "$net" >/dev/null 2>&1; then ok "removed network $net"
+    else warn "network $net not removed"; fi
   done
   docker volume rm "$LE_VOL" >/dev/null 2>&1 || true
   rm -f "$STATE" "$OVERRIDE" "$STATE_DIR/reconnect"
