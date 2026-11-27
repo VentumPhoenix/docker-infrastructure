@@ -1,0 +1,103 @@
+# Telegraf – collects host and container metrics and writes them to InfluxDB
+# Upstream: https://github.com/influxdata/telegraf
+# Requires: network socket-proxy (stack npmplus), an InfluxDB (stack influxdb)
+# Updates: auto
+
+x-required:
+  - ${INFLUXDB_URL:?e.g. https://influx.example.com}
+  - ${INFLUXDB_TOKEN:?write token for the bucket}
+
+x-base: &base
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-hardened: &hardened
+  <<: *base
+  cap_drop:
+    - ALL
+
+services:
+  app:
+    # Entrypoint sets capabilities on the binary and drops to user telegraf, so no *hardened
+    <<: *base
+    image: telegraf:alpine
+    environment:
+      # Read the host's system instead of the container's
+      HOST_ETC: /hostfs/etc
+      HOST_PROC: /hostfs/proc
+      HOST_SYS: /hostfs/sys
+      HOST_VAR: /hostfs/var
+      HOST_RUN: /hostfs/run
+      HOST_MOUNT_PREFIX: /hostfs
+    configs:
+      - source: app-config
+        target: /etc/telegraf/telegraf.conf
+    secrets:
+      - influxdb_token
+    volumes:
+      # Exception: the whole host filesystem, read-only, for host metrics
+      - /:/hostfs:ro
+    network_mode: host   # real network statistics of the host
+    healthcheck:   # outputs.health answers 200 while Telegraf runs
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:${TELEGRAF_HEALTH_PORT:-8099}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    pids_limit: 100
+    mem_limit: 256m
+
+configs:
+  app-config:
+    content: |
+      [agent]
+        interval = "${TELEGRAF_INTERVAL:-30s}"
+        flush_interval = "${TELEGRAF_INTERVAL:-30s}"
+        hostname = "${TELEGRAF_HOSTNAME:-}"
+        omit_hostname = false
+
+      # InfluxDB token from /run/secrets, never in the environment
+      [[secretstores.docker]]
+        id = "secrets"
+
+      [[outputs.influxdb_v2]]
+        urls = ["${INFLUXDB_URL}"]
+        token = "@{secrets:influxdb_token}"
+        organization = "${INFLUXDB_ORG:-homelab}"
+        bucket = "${INFLUXDB_BUCKET:-telegraf}"
+
+      # Health endpoint for the Docker healthcheck, localhost only
+      [[outputs.health]]
+        service_address = "http://127.0.0.1:${TELEGRAF_HEALTH_PORT:-8099}"
+        namepass = ["internal_agent"]
+
+      [[inputs.internal]]
+
+      [[inputs.cpu]]
+        percpu = false
+        totalcpu = true
+      [[inputs.mem]]
+      [[inputs.swap]]
+      [[inputs.system]]
+      [[inputs.processes]]
+      [[inputs.disk]]
+        ignore_fs = ["tmpfs", "devtmpfs", "devfs", "overlay", "aufs", "squashfs", "nsfs"]
+      [[inputs.diskio]]
+      [[inputs.net]]
+        ignore_protocol_stats = true
+      [[inputs.netstat]]
+
+      # Containers through the read-only socket proxy (host network -> its fixed IP)
+      [[inputs.docker]]
+        endpoint = "tcp://${SOCKET_PROXY_NET_PREFIX:-172.31.0}.2:${SOCKET_PROXY_PORT:-2375}"
+        gather_services = false
+        perdevice_include = ["cpu"]
+        total_include = ["cpu", "blkio", "network"]
+
+secrets:
+  influxdb_token:
+    environment: INFLUXDB_TOKEN

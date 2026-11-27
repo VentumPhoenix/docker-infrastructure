@@ -38,7 +38,7 @@ These must have the **same value in every stack**.
 | `NPM_PROXY_NETWORK` | – | `npm-proxy` | Name of the reverse proxy network | every stack |
 | `SOCKET_PROXY_NETWORK` | – | `socket-proxy` | Name of the Docker API network | npmplus, homepage, uptime-kuma |
 | `SOCKET_PROXY_HOST` | – | `socket-proxy` | Host name under which the socket proxy is reached | homepage, uptime-kuma |
-| `SOCKET_PROXY_PORT` | – | `2375` | Port of the socket proxy | homepage, uptime-kuma, beszel |
+| `SOCKET_PROXY_PORT` | – | `2375` | Port of the socket proxy | homepage, uptime-kuma, beszel, telegraf |
 
 ## Database
 
@@ -84,9 +84,11 @@ The same names are used by every stack that talks to InfluxDB (influxdb, telegra
 | `INFLUXDB_ADMIN_USER` | – | `admin` | Admin user, created on the first start | influxdb |
 | `INFLUXDB_ADMIN_PASSWORD` | ✅ | – | Password of the admin user, only used on the first start | influxdb |
 | `INFLUXDB_ADMIN_TOKEN` | ✅ | – | Admin API token, only used on the first start. Generate: `openssl rand -hex 32` | influxdb |
-| `INFLUXDB_ORG` | – | `homelab` | Organization | influxdb |
-| `INFLUXDB_BUCKET` | – | `telegraf` | Bucket for the metrics | influxdb |
+| `INFLUXDB_ORG` | – | `homelab` | Organization | influxdb, telegraf |
+| `INFLUXDB_BUCKET` | – | `telegraf` | Bucket for the metrics | influxdb, telegraf |
 | `INFLUXDB_RETENTION` | – | `30d` | How long metrics are kept, only used on the first start | influxdb |
+| `INFLUXDB_URL` | ✅ | – | Public URL of InfluxDB, e.g. `https://influx.example.com` | telegraf |
+| `INFLUXDB_TOKEN` | ✅ | – | API token of the client (Telegraf: write, Grafana: read), not the admin token | telegraf |
 
 ## Service accounts
 
@@ -144,6 +146,9 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `BESZEL_HUB_URL` | ✅ | – | URL of the Beszel hub the agent reports to | beszel-agent |
 | `BESZEL_AGENT_PORT` | – | `45876` | Port on the host the hub connects to | beszel-agent |
 | `BESZEL_SOCKET_PROXY_PORT` | – | `2375` | Localhost port of the agent's own socket proxy | beszel-agent |
+| `TELEGRAF_INTERVAL` | – | `30s` | Collection interval | telegraf |
+| `TELEGRAF_HOSTNAME` | – | (host name) | Host name in the metrics | telegraf |
+| `TELEGRAF_HEALTH_PORT` | – | `8099` | Localhost port of the health endpoint (host network) | telegraf |
 
 ## Infrastructure (`npmplus` stack only)
 
@@ -152,7 +157,7 @@ Accounts an automation tool uses to log into an app. Pattern: `<APP>_SERVICE_USE
 | `DOCKER_GID` | ✅ | – | Group ID of the Docker socket on the host: `ls -ln /var/run/docker.sock`. Also used by `beszel-agent`, which brings its own socket proxy |
 | `NPM_PROXY_NET_PREFIX` | – | `172.30.0` | First three octets of the `npm-proxy` subnet. Change only if it collides |
 | `NPM_PROXY_BRIDGE` | – | `br-npm` | Name of the Linux bridge of `npm-proxy` (used by `firewall`, max. 15 characters) |
-| `SOCKET_PROXY_NET_PREFIX` | – | `172.31.0` | First three octets of the `socket-proxy` subnet. Also used by the Beszel `agent` variant, which runs in the host network and has to reach the socket proxy by IP |
+| `SOCKET_PROXY_NET_PREFIX` | – | `172.31.0` | First three octets of the `socket-proxy` subnet. Also used by the Beszel `agent` variant and by `telegraf`, which run in the host network and have to reach the socket proxy by IP |
 | `SOCKET_PROXY_BRIDGE` | – | `br-sockprx` | Name of the Linux bridge of `socket-proxy` (max. 15 characters) |
 
 ---
