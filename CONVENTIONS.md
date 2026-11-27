@@ -84,8 +84,11 @@ The layers in detail:
 ├── docker-compose.<component>.yml # optional, runs on other/every host, e.g. docker-compose.telegraf.yml
 ├── .env.example                  # required as soon as the stack uses variables
 ├── .env                          # local only, NEVER commit (.gitignore)
+├── <task>.sh                     # optional, one-time host script, e.g. migrate-from-npm.sh
 └── README.md                     # required, see "Stack README" below
 ```
+
+**Scripts** are only for one-time jobs on the host that Compose can't do (e.g. a migration). The stack never needs them at runtime, so Dockhand deployment is unaffected. They are bash with `set -euo pipefail`, describe their usage in the header comment, have a `check` mode that changes nothing, ask before destructive steps, and keep their state and backups in a git-ignored `.migration/` folder. CI runs `shellcheck` on them.
 
 - **Folder name = stack name = Compose project name.** It is lowercase kebab-case and named after the product: `uptime-kuma`, `npmplus`, `authentik`.
 - The file is called `docker-compose.yml`, not `compose.yaml`. That is what Dockhand and the other stacks expect.
@@ -136,9 +139,7 @@ New features get a short, lowercase name and are added to this table.
 
 ### Components for other hosts
 
-Some stacks have a part that runs on **other** hosts, or on every host including its own: an agent, collector or worker that belongs to the stack (e.g. Telegraf for InfluxDB).
-
-**Exception – connecting a whole host:** everything a remote host needs to join the central infrastructure (Hawser for Dockhand, the Beszel agent, the remote NPMplus sync, the socket proxy for Uptime Kuma and Homepage, the firewall) lives together in the [`remote-host`](remote-host/) stack, selected with `COMPOSE_PROFILES`. New parts of that kind are added there, not to the parent stack. It lives **in the parent stack's folder**, not in a folder of its own:
+Some stacks have a part that runs on **other** hosts, or on every host including its own: an agent, collector or worker that belongs to the stack (e.g. Telegraf for InfluxDB). It lives **in the parent stack's folder**, not in a folder of its own:
 
 | Rule | Example |
 |---|---|
@@ -148,6 +149,8 @@ Some stacks have a part that runs on **other** hosts, or on every host including
 | Documented in the parent's `README.md`: file table with a "Runs on" column, plus a section for the component | see `influxdb/README.md` |
 
 It is not a variant: a variant replaces the base on the same host, a component runs **in addition**, somewhere else. In the root README's stack table, it appears in the parent's row.
+
+**Exception – connecting a whole host:** everything a remote host needs to join the central infrastructure (Hawser for Dockhand, the Beszel agent, the remote NPMplus sync, the socket proxy for Uptime Kuma and Homepage, the firewall) lives together in the [`remote-host`](remote-host/) stack, selected with `COMPOSE_PROFILES`. New parts of that kind are added there, not to the parent stack.
 
 ### Stack README
 

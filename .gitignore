@@ -2,3 +2,6 @@
 .env
 .env.*
 !.env.example
+
+# State and backups of npmplus/migrate-from-npm.sh (backups contain private keys)
+.migration/

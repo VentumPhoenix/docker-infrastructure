@@ -43,6 +43,42 @@ The entry point of the whole setup: reverse proxy with automatic certificates, p
 
 Other Docker hosts join through the [remote-host](../remote-host/) stack. Their syncs talk to the NPMplus admin API via NetBird: enable the commented port `"${NETBIRD_IP}:81:81"` in the compose file and set `NETBIRD_IP` to this host's NetBird IP. The port is then only reachable inside NetBird, restrict it further with a NetBird policy.
 
+### Migrating from nginx-proxy-manager
+
+[`migrate-from-npm.sh`](migrate-from-npm.sh) switches a running [nginx-proxy-manager](https://github.com/NginxProxyManager/nginx-proxy-manager) (jc21) over to this stack. It follows the [upstream migration steps](https://github.com/ZoeyVid/NPMplus#migration-from-upstreamvanilla-nginx-proxy-manager) and solves the part that makes it tricky: the apps still sit in the old NPM's network, which can't simply be removed while they're attached.
+
+```sh
+cd npmplus
+cp .env.example .env                            # fill in, as for a fresh install
+./migrate-from-npm.sh check -f <variant file>   # changes nothing, lists what needs attention
+./migrate-from-npm.sh migrate -f <variant file> # websites are offline for 1–3 minutes
+```
+
+`migrate` does:
+
+1. **Checks** Docker/Compose versions, the CPU (NPMplus needs x86-64-v2 or arm64), the database (only SQLite can be migrated), subnet collisions, and reads the old proxy hosts and certificates.
+2. **Backs up** `/data` and `/etc/letsencrypt` to `.migration/backup/` (git-ignored, contains private keys).
+3. **Stops** the old NPM. It is only stopped, its data stays untouched, so `rollback` always works.
+4. **Copies** the data into new volumes and starts NPMplus once with the old certificates mounted (NPMplus moves them into `/data`), then again normally.
+5. **Joins NPMplus to the old networks**, so every existing proxy host keeps working, even ones that forward to IPs.
+
+Then move one app after another into `npm-proxy` (the stacks of this repo already do that). When none is left in the old network:
+
+```sh
+./migrate-from-npm.sh finish     # removes the old container, its networks and leftovers
+```
+
+Something wrong? `./migrate-from-npm.sh rollback` stops NPMplus and starts the old NPM with its unchanged data.
+
+Things to know:
+
+- **If the old network is already called `npm-proxy`**, the script rebuilds it with the settings of this stack and reconnects every container with its aliases. In the rebuilt network containers can't reach each other, have no internet and get new IPs. `check` lists the affected containers. An app that talks to its database through that network breaks until it has its own `internal` network.
+- **The service user:** `INITIAL_ADMIN_*` only applies to a fresh install. If `NPM_SERVICE_USER` doesn't exist in the old database, create it in the UI afterwards with `NPM_SERVICE_PASSWORD`. `docker-sync` stays unhealthy until then. `check` tells you.
+- **Collisions with labels:** a manual proxy host for `APP_DOMAIN` (or for an app that now gets its host from labels) must be deleted, otherwise the sync can't create its own.
+- **Certificates** with the DNS providers NPMplus replaced or dropped (he, dnspod, online, powerdns, digitalocean, beget, route53) don't renew and must be created again. `check` lists them.
+- **The old networks are joined at runtime.** That survives restarts, but not a recreate of the container (e.g. an update). For longer transitions add them to the compose file as described below.
+- Going back from NPMplus to nginx-proxy-manager **after** `finish` is not possible (upstream), only through the backup.
+
 ### Migrating from an existing network
 
 If your apps still sit in an older proxy network (e.g. `npm-frontend`), NPMplus can temporarily join both. Add this to the `app` service and the `networks` block, and remove it again once every app has moved to `npm-proxy`:

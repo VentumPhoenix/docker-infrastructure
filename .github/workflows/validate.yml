@@ -48,3 +48,19 @@ jobs:
             rm -f "$env"
           done
           exit $status
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: |
+          files=$(git ls-files '*.sh')
+          if [ -z "$files" ]; then
+            echo "no scripts"
+            exit 0
+          fi
+          shellcheck --version
+          # shellcheck disable=SC2086  # one argument per file
+          shellcheck -f gcc $files

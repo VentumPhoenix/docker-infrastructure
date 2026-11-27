@@ -75,7 +75,7 @@ Check with `docker version` and `docker compose version`. Dockhand runs Compose 
 
 ## Getting started
 
-1. Deploy [npmplus](npmplus/) **by hand**. It creates the shared networks that every other stack joins.
+1. Deploy [npmplus](npmplus/) **by hand**. It creates the shared networks that every other stack joins. Coming from nginx-proxy-manager? Use its [migration script](npmplus/README.md#migrating-from-nginx-proxy-manager).
 2. Deploy [dockhand](dockhand/) **by hand**:
    ```bash
    cp .env.example .env   # fill in the REQUIRED block
